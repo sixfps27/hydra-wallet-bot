@@ -1,0 +1,24 @@
+{
+  "name": "hydra-wallet-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js",
+    "deploy": "node deploy-commands.js",
+    "test:turbofy": "node test-turbofy.js",
+    "reset:wallet": "node reset-wallet.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@discordjs/builders": "^1.14.1",
+    "better-sqlite3": "^12.11.1",
+    "discord.js": "^14.26.5",
+    "dotenv": "^17.4.2",
+    "qrcode": "^1.5.4"
+  }
+}
