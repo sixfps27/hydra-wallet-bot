@@ -10,6 +10,7 @@ const crypto = require("crypto");
 
 const carteiraCommand = require("./commands/carteira");
 const enviarCommand = require("./commands/enviar");
+const { extrairChavePixDaMensagem } = require("./utils/pixMessage");
 const { converterValor, formatarDinheiro } = require("./utils/money");
 const { criarCarregamento } = require("./views/loadingView");
 const { criarSucesso, criarComprovante } = require("./views/comprovanteView");
@@ -31,6 +32,7 @@ if (!process.env.TOKEN) {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const depositosPendentes = new Map();
+const pagamentosPorMensagemPendentes = new Map();
 const esperar = ms => new Promise(resolve => setTimeout(resolve, ms));
 const COOLDOWN_ENVIO_MS = Number(process.env.PIX_ERROR_COOLDOWN_MS || 60000);
 
@@ -41,6 +43,23 @@ function mensagemCooldown(cooldown) {
 
 function aplicarCooldownDeErro(userId, motivo = "payment_error") {
   return definirCooldown(userId, "pix_send", COOLDOWN_ENVIO_MS, motivo);
+}
+
+function criarModalValorMensagem(referenciaId) {
+  const modal = new ModalBuilder()
+    .setCustomId(`modal_enviar_mensagem:${referenciaId}`)
+    .setTitle("Pagar chave da mensagem");
+
+  modal.addComponents(new ActionRowBuilder().addComponents(
+    new TextInputBuilder()
+      .setCustomId("valor_pix_mensagem")
+      .setLabel("Valor do Pix")
+      .setPlaceholder("6,00")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+  ));
+
+  return modal;
 }
 
 function criarModalDeposito() {
@@ -209,6 +228,40 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
 
+    if (interaction.isMessageContextMenuCommand()) {
+      const chave = extrairChavePixDaMensagem(interaction.targetMessage?.content);
+      if (!chave) {
+        return interaction.reply({
+          content: "Não encontrei uma chave Pix válida nessa mensagem. Peça para a pessoa enviar somente a chave Pix ou use `/enviar`.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      if (interaction.commandName === "Copiar chave Pix") {
+        const arquivo = new AttachmentBuilder(Buffer.from(chave, "utf8"), { name: "chave-pix.txt" });
+        return interaction.reply({
+          content: `**Chave Pix encontrada**
+
+${chave}
+
+Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
+          files: [arquivo],
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      if (interaction.commandName === "Pagar esta chave") {
+        const referenciaId = crypto.randomUUID().replaceAll("-", "").slice(0, 16);
+        pagamentosPorMensagemPendentes.set(referenciaId, {
+          usuarioId: interaction.user.id,
+          chave,
+          criadoEm: Date.now()
+        });
+        setTimeout(() => pagamentosPorMensagemPendentes.delete(referenciaId), 10 * 60 * 1000).unref();
+        return interaction.showModal(criarModalValorMensagem(referenciaId));
+      }
+    }
+
     if (interaction.isButton() && interaction.customId === "depositar") {
       return interaction.showModal(criarModalDeposito());
     }
@@ -221,6 +274,22 @@ client.on(Events.InteractionCreate, async interaction => {
       const chave = interaction.fields.getTextInputValue("chave_pix");
       const valor = converterValor(interaction.fields.getTextInputValue("valor_pix"));
       return enviarCommand.preparar(interaction, chave, valor);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith("modal_enviar_mensagem:")) {
+      const referenciaId = interaction.customId.split(":")[1];
+      const pendente = pagamentosPorMensagemPendentes.get(referenciaId);
+      pagamentosPorMensagemPendentes.delete(referenciaId);
+
+      if (!pendente || pendente.usuarioId !== interaction.user.id || Date.now() - pendente.criadoEm > 10 * 60 * 1000) {
+        return interaction.reply({
+          content: "Essa solicitação expirou. Segure a mensagem novamente e escolha **Apps → Pagar esta chave**.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const valor = converterValor(interaction.fields.getTextInputValue("valor_pix_mensagem"));
+      return enviarCommand.preparar(interaction, pendente.chave, valor);
     }
 
     if (interaction.isModalSubmit() && interaction.customId === "modal_deposito") {

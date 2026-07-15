@@ -4,6 +4,8 @@ const { REST, Routes } = require("discord.js");
 
 const carteiraCommand = require("./commands/carteira");
 const enviarCommand = require("./commands/enviar");
+const pagarChaveMensagemCommand = require("./commands/pagarChaveMensagem");
+const copiarChaveMensagemCommand = require("./commands/copiarChaveMensagem");
 
 if (!process.env.TOKEN) {
   console.error("❌ TOKEN não encontrado no arquivo .env");
@@ -17,7 +19,9 @@ if (!process.env.CLIENT_ID) {
 
 const commands = [
   carteiraCommand.data.toJSON(),
-  enviarCommand.data.toJSON()
+  enviarCommand.data.toJSON(),
+  pagarChaveMensagemCommand.data.toJSON(),
+  copiarChaveMensagemCommand.data.toJSON()
 ];
 
 const rest = new REST({
