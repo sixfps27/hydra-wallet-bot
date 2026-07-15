@@ -1,0 +1,14 @@
+HYDRA SYSTEMS WALLET V6 — TAXA ADMINISTRATIVA
+
+Adicione ao .env:
+TURBOFY_DEPOSIT_FEE_PERCENT=2.5
+HYDRA_DEPOSIT_FEE_PERCENT=0.5
+HYDRA_ADMIN_WALLET_USER_ID=1484834490378485760
+
+Somente depósitos novos usam a nova separação de taxas.
+O cliente recebe o valor líquido após 3%.
+A carteira administrativa recebe 0,5%.
+A confirmação é atômica e idempotente: credited_at impede crédito duplicado.
+Saldos atuais e depósitos antigos não são alterados.
+
+Antes de instalar na VPS, faça backup do hydra-wallet.db.

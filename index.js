@@ -301,9 +301,25 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       try {
-        const taxaPercentual = Number(process.env.DEPOSIT_FEE_PERCENT || 3);
-        const taxa = Number((valor * (taxaPercentual / 100)).toFixed(2));
-        const liquido = Number((valor - taxa).toFixed(2));
+        const taxaTurbofyPercentual = Number(process.env.TURBOFY_DEPOSIT_FEE_PERCENT || 2.5);
+        const taxaHydraPercentual = Number(process.env.HYDRA_DEPOSIT_FEE_PERCENT || 0.5);
+
+        if (
+          !Number.isFinite(taxaTurbofyPercentual) || taxaTurbofyPercentual < 0 ||
+          !Number.isFinite(taxaHydraPercentual) || taxaHydraPercentual < 0
+        ) throw new Error("CONFIGURACAO_TAXA_DEPOSITO_INVALIDA");
+
+        const valorCents = Math.round(valor * 100);
+        const taxaTurbofyCents = Math.round(valorCents * (taxaTurbofyPercentual / 100));
+        const taxaHydraCents = Math.round(valorCents * (taxaHydraPercentual / 100));
+        const taxaTotalCents = taxaTurbofyCents + taxaHydraCents;
+        const liquidoCents = valorCents - taxaTotalCents;
+        if (liquidoCents <= 0) throw new Error("VALOR_LIQUIDO_INVALIDO");
+
+        const taxaTurbofy = taxaTurbofyCents / 100;
+        const taxaHydra = taxaHydraCents / 100;
+        const taxa = taxaTotalCents / 100;
+        const liquido = liquidoCents / 100;
         const id = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
         const expiraEm = new Date(Date.now() + 15 * 60 * 1000);
 
@@ -313,7 +329,12 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
           const arquivo = `pix-${id}.png`;
           depositosPendentes.set(id, { usuarioId: interaction.user.id, codigo, expiraEm: expiraEm.getTime() });
           const embed = new EmbedBuilder().setColor("#2563EB").setTitle("Depositar")
-            .setDescription(`**${formatarDinheiro(valor)}**\n\nSaldo após a taxa: **${formatarDinheiro(liquido)}**\n\nAmbiente de testes.`)
+            .setDescription(
+              `**${formatarDinheiro(valor)}**\n\n` +
+              `Taxa Turbofy (${taxaTurbofyPercentual}%): **${formatarDinheiro(taxaTurbofy)}**\n` +
+              `Taxa Hydra Systems (${taxaHydraPercentual}%): **${formatarDinheiro(taxaHydra)}**\n\n` +
+              `Saldo que será creditado: **${formatarDinheiro(liquido)}**\n\nAmbiente de testes.`
+            )
             .setImage(`attachment://${arquivo}`).setFooter({ text: "Hydra Wallet" });
           const components = [new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`copiar_pix:${id}`).setLabel("Pix copia e cola").setStyle(ButtonStyle.Primary),
@@ -323,15 +344,18 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
         }
 
         const cobranca = await criarCobrancaPix({
-          amountCents: Math.round(valor * 100),
+          amountCents: valorCents,
           description: "Depósito Hydra Wallet",
           externalRef: `hydra-deposit-${id}`,
           expiresAt: expiraEm.toISOString(),
           metadata: {
             hydraDepositId: id,
             discordUserId: interaction.user.id,
-            grossAmountCents: Math.round(valor * 100),
-            netAmountCents: Math.round(liquido * 100)
+            grossAmountCents: valorCents,
+            turbofyFeeCents: taxaTurbofyCents,
+            hydraFeeCents: taxaHydraCents,
+            totalFeeCents: taxaTotalCents,
+            netAmountCents: liquidoCents
           }
         });
 
@@ -340,14 +364,24 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
 
         criarDeposito({
           id, usuarioId: interaction.user.id, gatewayId: cobranca.id,
-          valorBruto: valor, taxa, valorLiquido: liquido, copiaECola,
+          valorBruto: valor,
+          taxa,
+          taxaProvedor: taxaTurbofy,
+          taxaAdmin: taxaHydra,
+          valorLiquido: liquido,
+          copiaECola,
           expiraEm: new Date(cobranca?.pix?.expiresAt || expiraEm).getTime()
         });
 
         const buffer = await QRCode.toBuffer(copiaECola, { type: "png", width: 500, margin: 2 });
         const arquivo = `pix-${id}.png`;
         const embed = new EmbedBuilder().setColor("#2563EB").setTitle("Depositar")
-          .setDescription(`**${formatarDinheiro(valor)}**\n\nSaldo após a taxa: **${formatarDinheiro(liquido)}**\n\nAguardando pagamento.`)
+          .setDescription(
+            `**${formatarDinheiro(valor)}**\n\n` +
+            `Taxa Turbofy (${taxaTurbofyPercentual}%): **${formatarDinheiro(taxaTurbofy)}**\n` +
+            `Taxa Hydra Systems (${taxaHydraPercentual}%): **${formatarDinheiro(taxaHydra)}**\n\n` +
+            `Saldo que será creditado: **${formatarDinheiro(liquido)}**\n\nAguardando pagamento.`
+          )
           .setImage(`attachment://${arquivo}`).setFooter({ text: "Hydra Wallet" });
         const components = [new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`copiar_pix_real:${id}`).setLabel("Pix copia e cola").setStyle(ButtonStyle.Primary),

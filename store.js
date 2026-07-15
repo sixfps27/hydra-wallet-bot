@@ -79,6 +79,8 @@ adicionarColunaSeFaltar("payments", "gateway_batch_id", "TEXT");
 adicionarColunaSeFaltar("payments", "gateway_status", "TEXT");
 adicionarColunaSeFaltar("payments", "gateway_payout_id", "TEXT");
 adicionarColunaSeFaltar("payments", "end_to_end_id", "TEXT");
+adicionarColunaSeFaltar("deposits", "provider_fee_cents", "INTEGER NOT NULL DEFAULT 0");
+adicionarColunaSeFaltar("deposits", "admin_fee_cents", "INTEGER NOT NULL DEFAULT 0");
 
 function garantirCarteira(userId) {
   const agora = Date.now();
@@ -247,10 +249,21 @@ function listarPagamentosReconciliaveis() {
   `).all().map(({ id }) => obterPagamento(id));
 }
 
-function criarDeposito({ id, usuarioId, gatewayId, valorBruto, taxa, valorLiquido, copiaECola, expiraEm }) {
+function criarDeposito({
+  id, usuarioId, gatewayId, valorBruto, taxa, taxaProvedor = 0, taxaAdmin = 0,
+  valorLiquido, copiaECola, expiraEm
+}) {
   garantirCarteira(usuarioId);
-  db.prepare(`INSERT INTO deposits(id,user_id,gateway_id,gross_cents,fee_cents,net_cents,status,copy_paste,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .run(id, usuarioId, gatewayId, paraCentavos(valorBruto), paraCentavos(taxa), paraCentavos(valorLiquido), "pending", copiaECola || null, expiraEm || null, Date.now());
+  db.prepare(`
+    INSERT INTO deposits(
+      id,user_id,gateway_id,gross_cents,fee_cents,provider_fee_cents,
+      admin_fee_cents,net_cents,status,copy_paste,expires_at,created_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    id, usuarioId, gatewayId, paraCentavos(valorBruto), paraCentavos(taxa),
+    paraCentavos(taxaProvedor), paraCentavos(taxaAdmin), paraCentavos(valorLiquido),
+    "pending", copiaECola || null, expiraEm || null, Date.now()
+  );
   return obterDeposito(id);
 }
 
@@ -259,7 +272,11 @@ function obterDeposito(id) {
   if (!d) return null;
   return {
     id: d.id, usuarioId: d.user_id, gatewayId: d.gateway_id,
-    valorBruto: paraReais(d.gross_cents), taxa: paraReais(d.fee_cents), valorLiquido: paraReais(d.net_cents),
+    valorBruto: paraReais(d.gross_cents),
+    taxa: paraReais(d.fee_cents),
+    taxaProvedor: paraReais(d.provider_fee_cents || 0),
+    taxaAdmin: paraReais(d.admin_fee_cents || 0),
+    valorLiquido: paraReais(d.net_cents),
     status: d.status, copiaECola: d.copy_paste, expiraEm: d.expires_at, criadoEm: d.created_at,
     pagoEm: d.paid_at, creditadoEm: d.credited_at
   };
@@ -268,16 +285,49 @@ function obterDeposito(id) {
 function marcarDepositoPago(id, status="paid") {
   const deposito = obterDeposito(id);
   if (!deposito) throw new Error("DEPOSITO_NAO_ENCONTRADO");
-  if (deposito.creditadoEm) return deposito;
+
+  const adminUserId = String(process.env.HYDRA_ADMIN_WALLET_USER_ID || "").trim();
   const agora = Date.now();
+
   db.transaction(() => {
+    const atual = db.prepare(`SELECT credited_at FROM deposits WHERE id=?`).get(deposito.id);
+    if (!atual || atual.credited_at) return;
+
+    const liquidoCents = paraCentavos(deposito.valorLiquido);
+    const taxaAdminCents = paraCentavos(deposito.taxaAdmin || 0);
+
+    garantirCarteira(deposito.usuarioId);
     db.prepare(`UPDATE wallets SET balance_cents=balance_cents+?,updated_at=? WHERE user_id=?`)
-      .run(paraCentavos(deposito.valorLiquido), agora, deposito.usuarioId);
+      .run(liquidoCents, agora, deposito.usuarioId);
+    db.prepare(`INSERT INTO transactions(user_id,type,amount_cents,description,reference_id,created_at) VALUES(?,?,?,?,?,?)`)
+      .run(
+        deposito.usuarioId,
+        "deposito",
+        liquidoCents,
+        `Depósito Pix (bruto R$ ${deposito.valorBruto.toFixed(2)}; taxa total R$ ${deposito.taxa.toFixed(2)})`,
+        deposito.id,
+        agora
+      );
+
+    if (taxaAdminCents > 0 && adminUserId) {
+      garantirCarteira(adminUserId);
+      db.prepare(`UPDATE wallets SET balance_cents=balance_cents+?,updated_at=? WHERE user_id=?`)
+        .run(taxaAdminCents, agora, adminUserId);
+      db.prepare(`INSERT INTO transactions(user_id,type,amount_cents,description,reference_id,created_at) VALUES(?,?,?,?,?,?)`)
+        .run(
+          adminUserId,
+          "taxa_deposito",
+          taxaAdminCents,
+          `Taxa Hydra Systems do depósito do usuário ${deposito.usuarioId}`,
+          deposito.id,
+          agora
+        );
+    }
+
     db.prepare(`UPDATE deposits SET status=?,paid_at=?,credited_at=? WHERE id=?`)
       .run(status, agora, agora, deposito.id);
-    db.prepare(`INSERT INTO transactions(user_id,type,amount_cents,description,reference_id,created_at) VALUES(?,?,?,?,?,?)`)
-      .run(deposito.usuarioId, "deposito", paraCentavos(deposito.valorLiquido), "Depósito Pix", deposito.id, agora);
   })();
+
   return obterDeposito(deposito.id);
 }
 
