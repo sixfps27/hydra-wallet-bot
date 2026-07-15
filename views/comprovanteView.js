@@ -37,15 +37,17 @@ function criarSucesso({ pagamento, saldo }) {
 }
 
 function criarComprovante({ pagamento, pagador }) {
-  const nomePagador = pagador?.globalName || pagador?.displayName || pagador?.username || "Usuário Hydra";
+  const nomePagador = process.env.HYDRA_PAYER_NAME || pagador?.globalName || pagador?.displayName || pagador?.username || "Usuário Hydra";
+  const documentoPagador = process.env.HYDRA_PAYER_DOCUMENT || null;
+  const instituicaoPagador = process.env.HYDRA_PAYER_INSTITUTION || "Hydra Wallet";
   const nomeRecebedor = pagamento.nomeDestinatario && pagamento.nomeDestinatario !== "Destinatário"
     ? pagamento.nomeDestinatario
     : "Titular da chave Pix";
 
   const campos = [
-    { name: "Dados do pagador", value: `**Nome:** ${nomePagador}\n**Conta:** Hydra Wallet`, inline: false },
+    { name: "Dados do pagador", value: `**Nome:** ${nomePagador}\n**CPF/CNPJ:** ${mascararDocumento(documentoPagador)}\n**Instituição:** ${instituicaoPagador}`, inline: false },
     { name: "Dados do recebedor", value: `**Nome:** ${nomeRecebedor}\n**Chave Pix:** \`${pagamento.chave}\`\n**CPF/CNPJ:** ${mascararDocumento(pagamento.documentoDestinatario)}\n**Instituição:** TurbofyPay`, inline: false },
-    { name: "Descrição", value: `**Forma de pagamento:** Pix\n**Valor:** ${formatarDinheiro(pagamento.valor)}\n**Data:** ${formatarData(pagamento.concluidoEm)}\n**Status:** Pago`, inline: false },
+    { name: "Descrição", value: `**Forma de pagamento:** Pix\n**Valor:** ${formatarDinheiro(pagamento.valor)}\n**Data e horário:** ${formatarData(pagamento.concluidoEm)}\n**Status:** Pago`, inline: false },
     { name: "Código Hydra", value: `\`${pagamento.codigoHydra}\``, inline: false }
   ];
 

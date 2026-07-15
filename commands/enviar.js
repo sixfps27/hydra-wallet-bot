@@ -1,14 +1,24 @@
 const { SlashCommandBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ApplicationIntegrationType, InteractionContextType } = require("discord.js");
-const { obterCarteira, criarPagamento } = require("../store");
+const { obterCarteira, criarPagamento, obterCooldown, definirCooldown } = require("../store");
 const { converterValor, formatarDinheiro } = require("../utils/money");
 const { chavePixValida, normalizarChavePix } = require("../utils/pix");
 const { criarConfirmacao } = require("../views/confirmacaoView");
 
 function criarModalEnviar(){ const m=new ModalBuilder().setCustomId("modal_enviar_pix").setTitle("Enviar Pix"); m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("chave_pix").setLabel("Chave Pix").setStyle(TextInputStyle.Short).setRequired(true)),new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("valor_pix").setLabel("Valor").setPlaceholder("10,00").setStyle(TextInputStyle.Short).setRequired(true))); return m; }
 
+function mensagemCooldown(cooldown) {
+ const segundos = Math.max(1, Math.ceil(cooldown.restanteMs / 1000));
+ return `Aguarde **${segundos} segundo${segundos === 1 ? "" : "s"}** para tentar enviar outro Pix. Esse intervalo protege a saúde da API de pagamentos.`;
+}
+
 async function preparar(interaction,chave,valor){
+ const cooldown = obterCooldown(interaction.user.id, "pix_send");
+ if(cooldown.ativo) return interaction.reply({content:mensagemCooldown(cooldown),flags:MessageFlags.Ephemeral});
  chave=normalizarChavePix(chave);
- if(!chavePixValida(chave)) return interaction.reply({content:"Chave Pix inválida.",flags:MessageFlags.Ephemeral});
+ if(!chavePixValida(chave)) {
+   definirCooldown(interaction.user.id, "pix_send", Number(process.env.PIX_ERROR_COOLDOWN_MS || 60000), "invalid_pix_key");
+   return interaction.reply({content:"Chave Pix inválida. Por segurança, aguarde **1 minuto** antes de tentar novamente.",flags:MessageFlags.Ephemeral});
+ }
  if(!Number.isFinite(valor)||valor<=0) return interaction.reply({content:"Valor inválido.",flags:MessageFlags.Ephemeral});
  const carteira=obterCarteira(interaction.user.id);
  if(valor>carteira.saldo) return interaction.reply({content:`Saldo insuficiente. Seu saldo é **${formatarDinheiro(carteira.saldo)}**.`,flags:MessageFlags.Ephemeral});

@@ -51,6 +51,13 @@ CREATE TABLE IF NOT EXISTS transactions (
   reference_id TEXT,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS action_cooldowns (
+  user_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  reason TEXT,
+  PRIMARY KEY (user_id, action)
+);
 `);
 
 function adicionarColunaSeFaltar(tabela, coluna, definicao) {
@@ -237,6 +244,33 @@ function atualizarStatusDeposito(id, status) {
   return obterDeposito(deposito.id);
 }
 
+function definirCooldown(userId, action = "pix_send", duracaoMs = 60000, motivo = "payment_error") {
+  const expiraEm = Date.now() + Math.max(1000, Number(duracaoMs) || 60000);
+  db.prepare(`
+    INSERT INTO action_cooldowns(user_id, action, expires_at, reason)
+    VALUES(?,?,?,?)
+    ON CONFLICT(user_id, action) DO UPDATE SET
+      expires_at=excluded.expires_at,
+      reason=excluded.reason
+  `).run(userId, action, expiraEm, motivo);
+  return { ativo: true, expiraEm, restanteMs: Math.max(0, expiraEm - Date.now()), motivo };
+}
+
+function obterCooldown(userId, action = "pix_send") {
+  const registro = db.prepare(`SELECT expires_at, reason FROM action_cooldowns WHERE user_id=? AND action=?`).get(userId, action);
+  if (!registro) return { ativo: false, restanteMs: 0, expiraEm: null, motivo: null };
+  const restanteMs = Number(registro.expires_at) - Date.now();
+  if (restanteMs <= 0) {
+    db.prepare(`DELETE FROM action_cooldowns WHERE user_id=? AND action=?`).run(userId, action);
+    return { ativo: false, restanteMs: 0, expiraEm: null, motivo: null };
+  }
+  return { ativo: true, restanteMs, expiraEm: Number(registro.expires_at), motivo: registro.reason || null };
+}
+
+function limparCooldown(userId, action = "pix_send") {
+  db.prepare(`DELETE FROM action_cooldowns WHERE user_id=? AND action=?`).run(userId, action);
+}
+
 function definirSaldo(userId, valor=0) {
   garantirCarteira(userId);
   db.prepare(`UPDATE wallets SET balance_cents=?, reserved_cents=0, updated_at=? WHERE user_id=?`)
@@ -259,5 +293,8 @@ module.exports = {
   criarDeposito,
   obterDeposito,
   marcarDepositoPago,
-  atualizarStatusDeposito
+  atualizarStatusDeposito,
+  definirCooldown,
+  obterCooldown,
+  limparCooldown
 };

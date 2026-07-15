@@ -18,7 +18,8 @@ const {
   reservarSaldo, concluirPagamento, falharPagamento,
   corrigirPagamentoConcluidoAposEstorno,
   listarPagamentosReconciliaveis,
-  criarDeposito, obterDeposito, marcarDepositoPago, atualizarStatusDeposito
+  criarDeposito, obterDeposito, marcarDepositoPago, atualizarStatusDeposito,
+  definirCooldown, obterCooldown
 } = require("./store");
 const { processarEnvioPix, verificarEnvioPix } = require("./services/walletManager");
 const { criarCobrancaPix, consultarCobrancaPix } = require("./services/turbofyGateway");
@@ -31,6 +32,16 @@ if (!process.env.TOKEN) {
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const depositosPendentes = new Map();
 const esperar = ms => new Promise(resolve => setTimeout(resolve, ms));
+const COOLDOWN_ENVIO_MS = Number(process.env.PIX_ERROR_COOLDOWN_MS || 60000);
+
+function mensagemCooldown(cooldown) {
+  const segundos = Math.max(1, Math.ceil(cooldown.restanteMs / 1000));
+  return `Aguarde **${segundos} segundo${segundos === 1 ? "" : "s"}** para tentar novamente. Esse intervalo protege a saúde da API de pagamentos.`;
+}
+
+function aplicarCooldownDeErro(userId, motivo = "payment_error") {
+  return definirCooldown(userId, "pix_send", COOLDOWN_ENVIO_MS, motivo);
+}
 
 function criarModalDeposito() {
   const modal = new ModalBuilder().setCustomId("modal_deposito").setTitle("Depositar");
@@ -123,7 +134,9 @@ async function reconciliarPagamento(pagamento) {
   }
 
   if (resultado.tipo === "falha" && pagamento.status === "processando") {
-    return falharPagamento(obterPagamento(pagamento.id), resultado.status);
+    const falhado = falharPagamento(obterPagamento(pagamento.id), resultado.status);
+    aplicarCooldownDeErro(pagamento.usuarioId, resultado.status);
+    return falhado;
   }
 
   return obterPagamento(pagamento.id);
@@ -286,7 +299,12 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.isButton() && interaction.customId.startsWith("copiar_pix_real:")) {
       const deposito = obterDeposito(interaction.customId.split(":")[1]);
       if (!deposito || deposito.usuarioId !== interaction.user.id) return interaction.reply({ content: "Depósito não encontrado.", flags: MessageFlags.Ephemeral });
-      return interaction.reply({ content: `Copie o código Pix abaixo:\n\n\`\`\`${deposito.copiaECola}\`\`\``, flags: MessageFlags.Ephemeral });
+      const arquivo = new AttachmentBuilder(Buffer.from(deposito.copiaECola, "utf8"), { name: "pix-copia-e-cola.txt" });
+      return interaction.reply({
+        content: `**Pix Copia e Cola**\n\nToque e segure o código abaixo para copiar:\n\n${deposito.copiaECola}\n\nSe preferir, abra o arquivo anexado.`,
+        files: [arquivo],
+        flags: MessageFlags.Ephemeral
+      });
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("verificar_deposito:")) {
@@ -312,6 +330,13 @@ client.on(Events.InteractionCreate, async interaction => {
       let pagamento = obterPagamento(id);
       if (!pagamento || pagamento.usuarioId !== interaction.user.id) return interaction.reply({ content: "Pagamento não encontrado.", flags: MessageFlags.Ephemeral });
       if (pagamento.status !== "aguardando_confirmacao") return interaction.reply({ content: "Esse pagamento já foi processado.", flags: MessageFlags.Ephemeral });
+      const cooldown = obterCooldown(interaction.user.id, "pix_send");
+      if (cooldown.ativo) {
+        return interaction.update({
+          embeds: [new EmbedBuilder().setColor("#F59E0B").setTitle("Aguarde para tentar novamente").setDescription(mensagemCooldown(cooldown)).setFooter({ text: "Hydra Wallet" })],
+          components: []
+        });
+      }
 
       try { reservarSaldo(pagamento); }
       catch (e) {
@@ -352,11 +377,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
         if (resultadoFinal.tipo === "falha") {
           pagamento = falharPagamento(obterPagamento(id), resultadoFinal.status);
+          aplicarCooldownDeErro(interaction.user.id, resultadoFinal.status);
           return interaction.editReply({
             embeds: [new EmbedBuilder()
               .setColor("#EF4444")
               .setTitle("Pagamento não realizado")
-              .setDescription("A Turbofy confirmou a falha. O valor voltou para sua carteira.")
+              .setDescription("A Turbofy confirmou a falha. O valor voltou para sua carteira. Aguarde **1 minuto** antes de tentar novamente.")
               .setFooter({ text: "Hydra Wallet" })],
             components: []
           });
@@ -382,11 +408,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
         if (pagamento?.status === "processando" && rejeicaoDefinitivaSemBatch) {
           falharPagamento(pagamento, erro.code || erro.message);
+          aplicarCooldownDeErro(interaction.user.id, erro.code || erro.message);
           return interaction.editReply({
             embeds: [new EmbedBuilder()
               .setColor("#EF4444")
               .setTitle("Pagamento não realizado")
-              .setDescription("A Turbofy recusou a solicitação. O valor voltou para sua carteira.")
+              .setDescription("A Turbofy recusou a solicitação. O valor voltou para sua carteira. Aguarde **1 minuto** antes de tentar novamente.")
               .setFooter({ text: "Hydra Wallet" })],
             components: []
           });
@@ -421,7 +448,8 @@ client.on(Events.InteractionCreate, async interaction => {
     if (interaction.isButton() && interaction.customId.startsWith("copiar_pix:")) {
       const d = depositosPendentes.get(interaction.customId.split(":")[1]);
       if (!d || d.usuarioId !== interaction.user.id || Date.now() > d.expiraEm) return interaction.reply({ content: "Esse depósito expirou.", flags: MessageFlags.Ephemeral });
-      return interaction.reply({ content: `\`\`\`${d.codigo}\`\`\``, flags: MessageFlags.Ephemeral });
+      const arquivo = new AttachmentBuilder(Buffer.from(d.codigo, "utf8"), { name: "pix-copia-e-cola.txt" });
+      return interaction.reply({ content: `**Pix Copia e Cola**\n\nToque e segure o código abaixo para copiar:\n\n${d.codigo}`, files: [arquivo], flags: MessageFlags.Ephemeral });
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("cancelar_deposito:")) {
