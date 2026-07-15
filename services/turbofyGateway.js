@@ -111,6 +111,72 @@ async function consultarPayout(batchId) {
   return requisicaoTurbofy({ method: "GET", path: `/v1/payouts/batches/${encodeURIComponent(batchId)}` });
 }
 
+
+async function baixarComprovantePayout(payoutItemId) {
+  if (!payoutItemId) throw new Error("PAYOUT_ITEM_ID_NAO_INFORMADO");
+
+  const path = `/sellers/saques/payout-items/${encodeURIComponent(payoutItemId)}/receipt`;
+  const { clientId, clientSecret } = credenciais();
+  if (!clientId || !clientSecret) throw new Error("CREDENCIAIS_TURBOFY_AUSENTES");
+
+  const timestamp = Date.now().toString();
+  const headers = {
+    Accept: "application/pdf",
+    "x-client-id": clientId,
+    "x-client-secret": clientSecret,
+    "x-turbofy-timestamp": timestamp,
+    "x-turbofy-signature": criarAssinatura({
+      method: "GET",
+      path,
+      timestamp,
+      rawBody: "",
+      clientSecret
+    })
+  };
+
+  let resposta = await fetch(`${API_URL}${path}`, { method: "GET", headers });
+
+  // Compatibilidade opcional caso a Turbofy exija um token específico para o endpoint de recibo.
+  // O token deve ser configurado no servidor, nunca salvo no código ou GitHub.
+  if ((resposta.status === 401 || resposta.status === 403) && process.env.TURBOFY_RECEIPT_BEARER_TOKEN) {
+    resposta = await fetch(`${API_URL}${path}`, {
+      method: "GET",
+      headers: {
+        Accept: "application/pdf",
+        Authorization: `Bearer ${process.env.TURBOFY_RECEIPT_BEARER_TOKEN}`
+      }
+    });
+  }
+
+  if (!resposta.ok) {
+    const texto = await resposta.text().catch(() => "");
+    const erro = new Error(`ERRO_COMPROVANTE_TURBOFY_HTTP_${resposta.status}`);
+    erro.status = resposta.status;
+    erro.details = texto.slice(0, 1000);
+    throw erro;
+  }
+
+  const contentType = resposta.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("application/pdf")) {
+    const texto = await resposta.text().catch(() => "");
+    const erro = new Error("RESPOSTA_COMPROVANTE_NAO_E_PDF");
+    erro.details = texto.slice(0, 1000);
+    throw erro;
+  }
+
+  const arrayBuffer = await resposta.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  if (buffer.length < 100 || buffer.subarray(0, 4).toString() !== "%PDF") {
+    throw new Error("PDF_COMPROVANTE_INVALIDO");
+  }
+
+  const disposition = resposta.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename\*?=(?:UTF-8''|\")?([^";]+)/i);
+  const nomeArquivo = match ? decodeURIComponent(match[1].replace(/"/g, "").trim()) : `comprovante-payout-${payoutItemId}.pdf`;
+
+  return { buffer, nomeArquivo, contentType };
+}
+
 async function listarPayouts() {
   return requisicaoTurbofy({ method: "GET", path: "/v1/payouts/batches" });
 }
@@ -122,5 +188,6 @@ module.exports = {
   consultarCobrancaPix,
   criarPayout,
   consultarPayout,
-  listarPayouts
+  listarPayouts,
+  baixarComprovantePayout
 };
