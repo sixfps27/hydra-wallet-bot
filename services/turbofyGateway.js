@@ -27,7 +27,6 @@ async function requisicaoTurbofy({ method, path, body, idempotencyKey, usarAssin
   const metodo = method.toUpperCase();
   const timestamp = Date.now().toString();
   const rawBody = body === undefined ? "" : JSON.stringify(body);
-
   const headers = {
     "x-client-id": clientId,
     "x-client-secret": clientSecret
@@ -74,13 +73,7 @@ async function criarCobrancaPix({ amountCents, description, externalRef, expires
     method: "POST",
     path: "/sellers/pix",
     usarAssinatura: false,
-    body: {
-      amountCents,
-      description,
-      externalRef,
-      expiresAt,
-      metadata: metadata || {}
-    }
+    body: { amountCents, description, externalRef, expiresAt, metadata: metadata || {} }
   });
 }
 
@@ -108,45 +101,76 @@ async function criarPayout({ pixKey, pixKeyType, amountCents, recipientName, rec
 }
 
 async function consultarPayout(batchId) {
-  return requisicaoTurbofy({ method: "GET", path: `/v1/payouts/batches/${encodeURIComponent(batchId)}` });
+  return requisicaoTurbofy({
+    method: "GET",
+    path: `/v1/payouts/batches/${encodeURIComponent(batchId)}`
+  });
 }
 
+async function baixarPdfPorEndpoint(endpoint) {
+  if (!endpoint) throw new Error("ENDPOINT_COMPROVANTE_NAO_INFORMADO");
 
-async function listarItensPayout(batchId) {
-  if (!batchId) throw new Error("BATCH_ID_NAO_INFORMADO");
+  let path = String(endpoint).trim();
+  if (path.startsWith(API_URL)) path = path.slice(API_URL.length);
+  if (!path.startsWith("/")) throw new Error("ENDPOINT_COMPROVANTE_INVALIDO");
 
-  // Endpoint oficial de itens do lote. A listagem de lotes retorna apenas
-  // contadores (paidItems/failedItems), não os objetos das transações.
-  const caminhos = [
-    `/v1/payouts/batches/${encodeURIComponent(batchId)}/items`,
-    `/v1/payouts/batches/${encodeURIComponent(batchId)}/payout-items`
-  ];
+  const { clientId, clientSecret } = credenciais();
+  if (!clientId || !clientSecret) throw new Error("CREDENCIAIS_TURBOFY_AUSENTES");
 
-  let ultimoErro = null;
-  for (const path of caminhos) {
-    try {
-      return await requisicaoTurbofy({ method: "GET", path });
-    } catch (erro) {
-      ultimoErro = erro;
-      if (![404, 405].includes(erro.status)) throw erro;
-    }
+  const timestamp = Date.now().toString();
+  const headers = {
+    Accept: "application/pdf",
+    "x-client-id": clientId,
+    "x-client-secret": clientSecret,
+    "x-turbofy-timestamp": timestamp,
+    "x-turbofy-signature": criarAssinatura({
+      method: "GET",
+      path,
+      timestamp,
+      rawBody: "",
+      clientSecret
+    })
+  };
+
+  const resposta = await fetch(`${API_URL}${path}`, { method: "GET", headers });
+  if (!resposta.ok) {
+    const texto = await resposta.text().catch(() => "");
+    let dados = {};
+    try { dados = texto ? JSON.parse(texto) : {}; }
+    catch { dados = { raw: texto }; }
+
+    const erro = new Error(
+      dados?.error?.message || dados?.message || `ERRO_COMPROVANTE_TURBOFY_HTTP_${resposta.status}`
+    );
+    erro.status = resposta.status;
+    erro.code = dados?.error?.code || dados?.code || `HTTP_${resposta.status}`;
+    erro.details = dados;
+    throw erro;
   }
-  throw ultimoErro || new Error("ITENS_DO_LOTE_NAO_ENCONTRADOS");
+
+  const contentType = resposta.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("application/pdf")) {
+    throw new Error("RESPOSTA_COMPROVANTE_NAO_E_PDF");
+  }
+
+  const buffer = Buffer.from(await resposta.arrayBuffer());
+  if (buffer.subarray(0, 4).toString() !== "%PDF") {
+    throw new Error("PDF_COMPROVANTE_INVALIDO");
+  }
+
+  const disposition = resposta.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename\*?=(?:UTF-8''|\")?([^\";]+)/i);
+  const fallbackId = path.split("/").filter(Boolean).slice(-2, -1)[0] || "turbofy";
+  const nomeArquivo = match
+    ? decodeURIComponent(match[1].replace(/"/g, "").trim())
+    : `comprovante-${fallbackId}.pdf`;
+
+  return { buffer, nomeArquivo, contentType, endpoint: path };
 }
 
 async function baixarComprovanteTransacao(transactionId) {
   if (!transactionId) throw new Error("TRANSACTION_ID_NAO_INFORMADO");
-  const id = encodeURIComponent(String(transactionId));
-  const path = `/v1/receipts/transactions/${id}`;
-  const { clientId, clientSecret } = credenciais();
-  const timestamp = Date.now().toString();
-  const headers = { Accept: "application/pdf", "x-client-id": clientId, "x-client-secret": clientSecret, "x-turbofy-timestamp": timestamp, "x-turbofy-signature": criarAssinatura({ method: "GET", path, timestamp, rawBody: "", clientSecret }) };
-  const resposta = await fetch(`${API_URL}${path}`, { method: "GET", headers });
-  if (!resposta.ok) { const texto = await resposta.text().catch(()=>""); let dados={}; try{dados=texto?JSON.parse(texto):{}}catch{dados={raw:texto}}; const erro=new Error(dados?.error?.message||dados?.message||`ERRO_COMPROVANTE_TURBOFY_HTTP_${resposta.status}`); erro.status=resposta.status; erro.code=dados?.error?.code||dados?.code||`HTTP_${resposta.status}`; erro.details=dados; throw erro; }
-  const contentType=resposta.headers.get("content-type")||""; if(!contentType.toLowerCase().includes("application/pdf")) throw new Error("RESPOSTA_COMPROVANTE_NAO_E_PDF");
-  const buffer=Buffer.from(await resposta.arrayBuffer()); if(buffer.subarray(0,4).toString()!=="%PDF") throw new Error("PDF_COMPROVANTE_INVALIDO");
-  const disposition=resposta.headers.get("content-disposition")||""; const match=disposition.match(/filename\*?=(?:UTF-8''|\")?([^";]+)/i); const nomeArquivo=match?decodeURIComponent(match[1].replace(/"/g,"").trim()):`comprovante-transacao-${transactionId}.pdf`;
-  return { buffer, nomeArquivo, contentType };
+  return baixarPdfPorEndpoint(`/v1/receipts/transactions/${encodeURIComponent(String(transactionId))}`);
 }
 
 async function listarPayouts() {
@@ -161,6 +185,6 @@ module.exports = {
   criarPayout,
   consultarPayout,
   listarPayouts,
-  listarItensPayout,
+  baixarPdfPorEndpoint,
   baixarComprovanteTransacao
 };
