@@ -24,6 +24,7 @@ const {
 } = require("./store");
 const { processarEnvioPix, verificarEnvioPix } = require("./services/walletManager");
 const { criarCobrancaPix, consultarCobrancaPix } = require("./services/turbofyGateway");
+const { enviarComprovantePagamento } = require("./services/receiptDeliveryService");
 
 if (!process.env.TOKEN) {
   console.error("TOKEN não encontrado no .env");
@@ -147,9 +148,13 @@ async function reconciliarPagamento(pagamento) {
     const atual = obterPagamento(pagamento.id);
     if (atual.status === "falhou") {
       console.warn(`Corrigindo estorno indevido do pagamento ${pagamento.id}.`);
-      return corrigirPagamentoConcluidoAposEstorno(atual, pagamento.batchId, resultado.status);
+      const corrigido = corrigirPagamentoConcluidoAposEstorno(atual, pagamento.batchId, resultado.status);
+      enviarComprovantePagamento({ client, paymentId: corrigido.id }).catch(erro => console.error("Erro ao enviar comprovante reconciliado:", erro.message));
+      return corrigido;
     }
-    return concluirPagamento(atual, pagamento.batchId, resultado.status);
+    const concluido = concluirPagamento(atual, pagamento.batchId, resultado.status);
+    enviarComprovantePagamento({ client, paymentId: concluido.id }).catch(erro => console.error("Erro ao enviar comprovante reconciliado:", erro.message));
+    return concluido;
   }
 
   if (resultado.tipo === "falha" && pagamento.status === "processando") {
@@ -474,6 +479,8 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
 
         if (resultadoFinal.tipo === "sucesso") {
           pagamento = concluirPagamento(obterPagamento(id), batchId, resultadoFinal.status);
+          enviarComprovantePagamento({ client, paymentId: pagamento.id, user: interaction.user })
+            .catch(erro => console.error("Erro ao enviar comprovante no canal privado:", erro.message));
           const saldo = obterCarteira(interaction.user.id).saldo;
           return interaction.editReply(criarSucesso({ pagamento, saldo }));
         }

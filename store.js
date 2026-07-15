@@ -79,6 +79,7 @@ adicionarColunaSeFaltar("payments", "gateway_batch_id", "TEXT");
 adicionarColunaSeFaltar("payments", "gateway_status", "TEXT");
 adicionarColunaSeFaltar("payments", "gateway_payout_id", "TEXT");
 adicionarColunaSeFaltar("payments", "end_to_end_id", "TEXT");
+adicionarColunaSeFaltar("payments", "receipt_sent_at", "INTEGER");
 adicionarColunaSeFaltar("deposits", "provider_fee_cents", "INTEGER NOT NULL DEFAULT 0");
 adicionarColunaSeFaltar("deposits", "admin_fee_cents", "INTEGER NOT NULL DEFAULT 0");
 
@@ -150,7 +151,7 @@ function criarPagamento({ usuarioId, chave, valor, nomeDestinatario="Destinatár
 function obterPagamento(id) {
   const p = db.prepare(`SELECT * FROM payments WHERE id=?`).get(id);
   if (!p) return null;
-  return { id:p.id, usuarioId:p.user_id, chave:p.pix_key, nomeDestinatario:p.recipient_name, documentoDestinatario:p.recipient_document, valor:paraReais(p.amount_cents), status:p.status, codigoHydra:p.hydra_code, batchId:p.gateway_batch_id, gatewayStatus:p.gateway_status, payoutId:p.gateway_payout_id, endToEndId:p.end_to_end_id, criadoEm:p.created_at, concluidoEm:p.completed_at };
+  return { id:p.id, usuarioId:p.user_id, chave:p.pix_key, nomeDestinatario:p.recipient_name, documentoDestinatario:p.recipient_document, valor:paraReais(p.amount_cents), status:p.status, codigoHydra:p.hydra_code, batchId:p.gateway_batch_id, gatewayStatus:p.gateway_status, payoutId:p.gateway_payout_id, endToEndId:p.end_to_end_id, criadoEm:p.created_at, concluidoEm:p.completed_at, comprovanteEnviadoEm:p.receipt_sent_at };
 }
 
 function atualizarPagamento(id, campos={}) {
@@ -237,6 +238,21 @@ function corrigirPagamentoConcluidoAposEstorno(pagamento, batchId, gatewayStatus
   })();
 
   return obterPagamento(pagamento.id);
+}
+
+function marcarComprovanteEnviado(paymentId) {
+  const agora = Date.now();
+  const resultado = db.prepare(`
+    UPDATE payments
+    SET receipt_sent_at=?
+    WHERE id=? AND receipt_sent_at IS NULL
+  `).run(agora, paymentId);
+  return resultado.changes > 0;
+}
+
+function liberarComprovanteParaReenvio(paymentId) {
+  db.prepare(`UPDATE payments SET receipt_sent_at=NULL WHERE id=?`).run(paymentId);
+  return obterPagamento(paymentId);
 }
 
 function listarPagamentosReconciliaveis() {
@@ -393,5 +409,7 @@ module.exports = {
   atualizarStatusDeposito,
   definirCooldown,
   obterCooldown,
-  limparCooldown
+  limparCooldown,
+  marcarComprovanteEnviado,
+  liberarComprovanteParaReenvio
 };
