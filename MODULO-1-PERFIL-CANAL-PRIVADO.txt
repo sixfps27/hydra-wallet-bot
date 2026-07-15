@@ -1,0 +1,25 @@
+HYDRA SYSTEMS WALLET — MÓDULO 1
+
+O que foi adicionado:
+- Perfil automático ao usar /carteira.
+- Apenas um canal privado por Discord ID.
+- Reutilização do canal salvo no banco.
+- Recuperação do canal pelo tópico interno se o vínculo do banco se perder.
+- Recriação somente se o canal antigo tiver sido apagado.
+- Acesso apenas do cliente, cargo administrador e bot.
+- Nova tabela wallet_profiles criada com CREATE TABLE IF NOT EXISTS.
+- Nenhuma instrução UPDATE/DELETE na tabela wallets durante instalação.
+
+Permissões necessárias do bot no servidor principal:
+- Ver canais
+- Gerenciar canais
+- Gerenciar permissões
+- Enviar mensagens
+- Anexar arquivos
+- Inserir links
+
+IDs usados como padrão:
+Servidor: 1524282646778085407
+Categoria: 1526865968222044180
+Cargo admin: 1526866107976126485
+Canal de logs: 1526866030255673434

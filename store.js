@@ -58,6 +58,15 @@ CREATE TABLE IF NOT EXISTS action_cooldowns (
   reason TEXT,
   PRIMARY KEY (user_id, action)
 );
+CREATE TABLE IF NOT EXISTS wallet_profiles (
+  user_id TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  display_name TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  private_channel_id TEXT UNIQUE,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `);
 
 function adicionarColunaSeFaltar(tabela, coluna, definicao) {
@@ -81,6 +90,41 @@ function obterCarteira(userId) {
   const w = db.prepare(`SELECT balance_cents,reserved_cents FROM wallets WHERE user_id=?`).get(userId);
   const extrato = db.prepare(`SELECT type AS tipo, amount_cents, description AS nome, reference_id AS id, created_at AS criadoEm FROM transactions WHERE user_id=? ORDER BY created_at DESC LIMIT 20`).all(userId);
   return { saldo: paraReais(w.balance_cents), reservado: paraReais(w.reserved_cents), extrato: extrato.map(x => ({...x, valor: paraReais(x.amount_cents)})) };
+}
+
+function criarOuAtualizarPerfilWallet({ userId, username, displayName }) {
+  const agora = Date.now();
+  garantirCarteira(userId);
+  db.prepare(`
+    INSERT INTO wallet_profiles(user_id, username, display_name, status, private_channel_id, created_at, updated_at)
+    VALUES(?,?,?,'active',NULL,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      username=excluded.username,
+      display_name=excluded.display_name,
+      updated_at=excluded.updated_at
+  `).run(userId, username || "usuario", displayName || username || "Usuário", agora, agora);
+  return obterPerfilWallet(userId);
+}
+
+function obterPerfilWallet(userId) {
+  const perfil = db.prepare(`SELECT * FROM wallet_profiles WHERE user_id=?`).get(userId);
+  if (!perfil) return null;
+  return {
+    userId: perfil.user_id,
+    username: perfil.username,
+    displayName: perfil.display_name,
+    status: perfil.status,
+    privateChannelId: perfil.private_channel_id,
+    createdAt: perfil.created_at,
+    updatedAt: perfil.updated_at
+  };
+}
+
+function atualizarCanalPrivadoPerfil(userId, channelId) {
+  const agora = Date.now();
+  db.prepare(`UPDATE wallet_profiles SET private_channel_id=?, updated_at=? WHERE user_id=?`)
+    .run(channelId || null, agora, userId);
+  return obterPerfilWallet(userId);
 }
 
 function adicionarSaldo(userId, valor, descricao="Crédito") {
@@ -280,6 +324,9 @@ function definirSaldo(userId, valor=0) {
 
 module.exports = {
   obterCarteira,
+  criarOuAtualizarPerfilWallet,
+  obterPerfilWallet,
+  atualizarCanalPrivadoPerfil,
   adicionarSaldo,
   definirSaldo,
   criarPagamento,

@@ -1,0 +1,35 @@
+HYDRA SYSTEMS WALLET V5
+
+NOVO:
+- Perfil automático ao usar /carteira ou /enviar.
+- Canal privado automático dentro da categoria configurada.
+- Comprovante PNG automático no canal privado após Pix concluído.
+- Quem pagou no comprovante: Turbofy Pagamentos.
+- Canal administrativo de logs.
+- /perfil-wallet usuario
+- /admin-wallet
+- /ajustar-saldo usuario novo-saldo motivo
+- /bloquear-wallet usuario acao motivo
+- Mantido Apps > Pagar esta chave.
+- Removido Apps > Copiar chave Pix.
+- Pix Copia e Cola do depósito continua em texto puro + arquivo TXT.
+- Cooldown de 60 segundos após chave inválida ou falha confirmada.
+- Script npm run backup (mantém 14 backups).
+
+SEGURANÇA:
+Este pacote NÃO deve substituir .env nem hydra-wallet.db na instalação atual.
+Faça backup antes de atualizar.
+
+APÓS ATUALIZAR:
+1. Adicione as variáveis HYDRA_* do .env.example ao .env da VPS.
+2. npm install
+3. npm run deploy
+4. pm2 restart hydra-wallet --update-env
+
+PERMISSÕES DO BOT NO SERVIDOR PRINCIPAL:
+- Ver canais
+- Gerenciar canais
+- Gerenciar permissões
+- Enviar mensagens
+- Anexar arquivos
+- Ler histórico
