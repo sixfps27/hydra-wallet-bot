@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { AttachmentBuilder, EmbedBuilder } = require("discord.js");
 const { garantirPerfilECanalPrivado } = require("./profileChannelService");
-const { baixarComprovantePayout } = require("./turbofyGateway");
+const { baixarComprovanteTransacao } = require("./turbofyGateway");
 const { obterPagamento, marcarComprovanteEnviado } = require("../store");
 
 const RECEIPTS_DIR = path.join(__dirname, "..", "receipts");
@@ -21,19 +21,66 @@ function nomeSeguro(nome, fallback) {
   return String(nome || fallback).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
 }
 
+function esperar(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function identificadoresDoPagamento(pagamento) {
+  // O endpoint oficial aceita vários identificadores. Preferimos o EndToEndId,
+  // pois é o identificador Pix mais estável quando já está disponível.
+  return [
+    pagamento.endToEndId,
+    pagamento.payoutId,
+    pagamento.batchId,
+    pagamento.id
+  ].filter((valor, indice, lista) => valor && lista.indexOf(valor) === indice);
+}
+
+async function baixarComTentativas(pagamento) {
+  const identificadores = identificadoresDoPagamento(pagamento);
+  if (!identificadores.length) throw new Error("PAGAMENTO_SEM_IDENTIFICADOR_DE_COMPROVANTE");
+
+  let ultimoErro = null;
+
+  // A Turbofy pode retornar 409 por alguns segundos após o payout ser concluído.
+  // Fazemos três rodadas curtas sem repetir pagamentos nem alterar saldo.
+  for (let rodada = 0; rodada < 3; rodada++) {
+    for (const identificador of identificadores) {
+      try {
+        return await baixarComprovanteTransacao(identificador);
+      } catch (erro) {
+        ultimoErro = erro;
+        const podeTentarOutroId = [400, 404].includes(erro.status);
+        const aindaGerando = erro.status === 409 || erro.code === "RECEIPT_UNAVAILABLE";
+
+        if (!podeTentarOutroId && !aindaGerando) throw erro;
+      }
+    }
+
+    if (rodada < 2) await esperar([3000, 7000][rodada]);
+  }
+
+  throw ultimoErro || new Error("COMPROVANTE_OFICIAL_NAO_DISPONIVEL");
+}
+
 async function obterPdfOficial(pagamento) {
-  if (!pagamento.payoutId) throw new Error("PAGAMENTO_SEM_PAYOUT_ITEM_ID");
   garantirPastaComprovantes();
 
-  const nomeCache = nomeSeguro(`comprovante-${pagamento.codigoHydra || pagamento.id}-${pagamento.payoutId}.pdf`, `comprovante-${pagamento.id}.pdf`);
+  const identificadorCache = pagamento.endToEndId || pagamento.payoutId || pagamento.batchId || pagamento.id;
+  const nomeCache = nomeSeguro(
+    `comprovante-${pagamento.codigoHydra || pagamento.id}-${identificadorCache}.pdf`,
+    `comprovante-${pagamento.id}.pdf`
+  );
   const caminho = path.join(RECEIPTS_DIR, nomeCache);
 
   if (fs.existsSync(caminho)) {
     const buffer = fs.readFileSync(caminho);
-    if (buffer.subarray(0, 4).toString() === "%PDF") return { buffer, nomeArquivo: nomeCache, cache: true };
+    if (buffer.subarray(0, 4).toString() === "%PDF") {
+      return { buffer, nomeArquivo: nomeCache, cache: true };
+    }
   }
 
-  const oficial = await baixarComprovantePayout(pagamento.payoutId);
+  const oficial = await baixarComTentativas(pagamento);
   fs.writeFileSync(caminho, oficial.buffer);
   return { buffer: oficial.buffer, nomeArquivo: nomeCache, cache: false };
 }
@@ -42,7 +89,7 @@ async function enviarComprovantePagamento({ client, paymentId, user = null }) {
   let pagamento = obterPagamento(paymentId);
   if (!pagamento || pagamento.status !== "concluido") return { enviado: false, motivo: "PAGAMENTO_NAO_CONCLUIDO" };
   if (pagamento.comprovanteEnviadoEm) return { enviado: false, motivo: "JA_ENVIADO" };
-  if (!pagamento.payoutId) return { enviado: false, motivo: "PAYOUT_ITEM_ID_AINDA_NAO_DISPONIVEL" };
+  if (!identificadoresDoPagamento(pagamento).length) return { enviado: false, motivo: "IDENTIFICADOR_COMPROVANTE_AINDA_NAO_DISPONIVEL" };
 
   const usuario = user || await client.users.fetch(pagamento.usuarioId).catch(() => null);
   if (!usuario) return { enviado: false, motivo: "USUARIO_NAO_ENCONTRADO" };
