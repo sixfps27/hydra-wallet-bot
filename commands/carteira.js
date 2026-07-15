@@ -26,11 +26,14 @@ module.exports = {
   async execute(interaction) {
     // A criação do perfil/canal não altera saldo. Se o Discord negar a criação,
     // a carteira continua abrindo normalmente.
-    garantirPerfilECanalPrivado({
+    // Aguarda a criação/recuperação do canal antes de responder. Assim o /carteira
+    // já deixa o canal privado pronto na mesma execução.
+    const resultadoCanal = await garantirPerfilECanalPrivado({
       client: interaction.client,
       user: interaction.user
     }).catch(error => {
       console.error(`Erro ao preparar perfil privado de ${interaction.user.id}:`, error);
+      return null;
     });
 
     await interaction.reply({

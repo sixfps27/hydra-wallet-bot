@@ -30,18 +30,65 @@ function limparNomeCanal(nome, userId) {
 async function enviarLog(guild, mensagem) {
   try {
     const canal = await guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
-    if (canal?.isTextBased()) {
-      await canal.send({ content: mensagem });
-    }
+    if (canal?.isTextBased()) await canal.send({ content: mensagem });
   } catch (erro) {
     console.error("Erro ao enviar log de perfil:", erro.message);
   }
 }
 
-async function garantirPerfilECanalPrivado({ client, user }) {
-  if (!client || !user?.id) {
-    throw new Error("DADOS_DE_PERFIL_INVALIDOS");
+function permissoesDoCanal({ guild, member, adminRole, botMember }) {
+  const overwrites = [
+    {
+      id: guild.roles.everyone.id,
+      deny: [PermissionFlagsBits.ViewChannel]
+    },
+    {
+      // Usar o ID de um Member já buscado evita o erro
+      // "Supplied parameter is not a cached User or Role".
+      id: member.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory
+      ],
+      deny: [PermissionFlagsBits.SendMessages]
+    }
+  ];
+
+  // Só adiciona o cargo administrativo se ele realmente existir no servidor.
+  if (adminRole) {
+    overwrites.push({
+      id: adminRole.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.AttachFiles,
+        PermissionFlagsBits.EmbedLinks
+      ]
+    });
   }
+
+  // O bot também precisa estar resolvido como membro do servidor.
+  if (botMember) {
+    overwrites.push({
+      id: botMember.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.AttachFiles,
+        PermissionFlagsBits.EmbedLinks,
+        PermissionFlagsBits.ManageMessages,
+        PermissionFlagsBits.ManageChannels
+      ]
+    });
+  }
+
+  return overwrites;
+}
+
+async function garantirPerfilECanalPrivado({ client, user }) {
+  if (!client || !user?.id) throw new Error("DADOS_DE_PERFIL_INVALIDOS");
 
   let perfil = criarOuAtualizarPerfilWallet({
     userId: user.id,
@@ -55,25 +102,19 @@ async function garantirPerfilECanalPrivado({ client, user }) {
     return { perfil, canal: null, criado: false, motivo: "GUILD_NAO_ENCONTRADA" };
   }
 
-  // Se o perfil já tem canal salvo e ele ainda existe, reutiliza.
   if (perfil.privateChannelId) {
     const canalExistente = await guild.channels.fetch(perfil.privateChannelId).catch(() => null);
-    if (canalExistente) {
-      return { perfil, canal: canalExistente, criado: false };
-    }
-
-    // O canal foi apagado; limpa o vínculo e permite recriação.
+    if (canalExistente) return { perfil, canal: canalExistente, criado: false };
     atualizarCanalPrivadoPerfil(user.id, null);
     perfil = obterPerfilWallet(user.id);
   }
 
-  const membro = await guild.members.fetch(user.id).catch(() => null);
-  if (!membro) {
+  const member = await guild.members.fetch(user.id).catch(() => null);
+  if (!member) {
     console.warn(`Usuário ${user.id} não está no servidor principal; canal privado não criado.`);
     return { perfil, canal: null, criado: false, motivo: "USUARIO_FORA_DO_SERVIDOR" };
   }
 
-  // Proteção extra: procura um canal já criado para esse usuário, mesmo se o banco perdeu o vínculo.
   const topico = `hydra-wallet-user:${user.id}`;
   const canais = await guild.channels.fetch();
   const canalRecuperado = canais.find(
@@ -91,67 +132,36 @@ async function garantirPerfilECanalPrivado({ client, user }) {
     return { perfil, canal: null, criado: false, motivo: "CATEGORIA_NAO_ENCONTRADA" };
   }
 
-  const nomeCanal = limparNomeCanal(user.globalName || user.username, user.id);
+  // Busca explicitamente o cargo e o próprio bot antes de montar permissionOverwrites.
+  const adminRole = await guild.roles.fetch(ADMIN_ROLE_ID).catch(() => null);
+  const botMember = await guild.members.fetchMe().catch(() => null);
+
+  if (!adminRole) {
+    console.warn(`Cargo administrador ${ADMIN_ROLE_ID} não existe neste servidor. O canal será criado sem esse overwrite.`);
+  }
+  if (!botMember) throw new Error("BOT_NAO_ENCONTRADO_NO_SERVIDOR");
 
   const canal = await guild.channels.create({
-    name: nomeCanal,
+    name: limparNomeCanal(user.globalName || user.username, user.id),
     type: ChannelType.GuildText,
-    parent: PRIVATE_CATEGORY_ID,
+    parent: categoria.id,
     topic: topico,
     reason: `Canal privado da Hydra Systems para ${user.tag || user.username}`,
-    permissionOverwrites: [
-      {
-        id: guild.roles.everyone.id,
-        deny: [PermissionFlagsBits.ViewChannel]
-      },
-      {
-        id: user.id,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.ReadMessageHistory
-        ],
-        deny: [PermissionFlagsBits.SendMessages]
-      },
-      {
-        id: ADMIN_ROLE_ID,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.ReadMessageHistory,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.AttachFiles,
-          PermissionFlagsBits.EmbedLinks
-        ]
-      },
-      {
-        id: client.user.id,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.ReadMessageHistory,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.AttachFiles,
-          PermissionFlagsBits.EmbedLinks,
-          PermissionFlagsBits.ManageMessages
-        ]
-      }
-    ]
+    permissionOverwrites: permissoesDoCanal({ guild, member, adminRole, botMember })
   });
 
   perfil = atualizarCanalPrivadoPerfil(user.id, canal.id);
 
   await canal.send({
     content: [
-      `# Hydra Systems Wallet`,
+      "# Hydra Systems Wallet",
       `Olá, <@${user.id}>. Este é o seu canal privado de comprovantes.`,
-      `Somente você e a equipe autorizada da Hydra Wallet podem visualizar este canal.`,
-      `Os comprovantes e movimentações da sua carteira serão enviados aqui nas próximas atualizações.`
+      "Somente você e a equipe autorizada da Hydra Wallet podem visualizar este canal.",
+      "Os comprovantes e movimentações da sua carteira serão enviados aqui."
     ].join("\n")
   });
 
-  await enviarLog(
-    guild,
-    `✅ Canal privado criado para <@${user.id}>: <#${canal.id}>`
-  );
-
+  await enviarLog(guild, `✅ Canal privado criado para <@${user.id}>: <#${canal.id}>`);
   return { perfil, canal, criado: true };
 }
 

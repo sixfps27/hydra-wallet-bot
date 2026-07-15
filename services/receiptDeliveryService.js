@@ -2,8 +2,8 @@ const fs = require("fs");
 const path = require("path");
 const { AttachmentBuilder, EmbedBuilder } = require("discord.js");
 const { garantirPerfilECanalPrivado } = require("./profileChannelService");
-const { baixarComprovanteTransacao } = require("./turbofyGateway");
-const { obterPagamento, marcarComprovanteEnviado } = require("../store");
+const { baixarComprovanteTransacao, listarItensPayout } = require("./turbofyGateway");
+const { obterPagamento, atualizarPagamento, marcarComprovanteEnviado } = require("../store");
 
 const RECEIPTS_DIR = path.join(__dirname, "..", "receipts");
 
@@ -23,6 +23,65 @@ function nomeSeguro(nome, fallback) {
 
 function esperar(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function primeiro(...valores) {
+  return valores.find(valor => valor !== undefined && valor !== null && String(valor).trim() !== "") || null;
+}
+
+function listaDeItens(resposta) {
+  if (Array.isArray(resposta)) return resposta;
+  for (const chave of ["items", "data", "results", "payoutItems", "payout_items", "paidItems", "paid_items"]) {
+    if (Array.isArray(resposta?.[chave])) return resposta[chave];
+  }
+  return [];
+}
+
+function extrairIdsDoItem(item = {}) {
+  return {
+    payoutId: primeiro(item.id, item.payoutItemId, item.payout_item_id),
+    endToEndId: primeiro(item.endToEndId, item.endToEnd, item.e2eId, item.end_to_end_id, item.pix?.endToEndId),
+    providerTransactionId: primeiro(item.providerTransactionId, item.provider_transaction_id, item.transactionId, item.transaction_id),
+    providerChargeId: primeiro(item.providerChargeId, item.provider_charge_id, item.chargeId, item.charge_id),
+    pixTxid: primeiro(item.pixTxid, item.pix_txid, item.txid, item.pix?.txid),
+    externalRef: primeiro(item.externalRef, item.external_ref, item.externalReference, item.referenceId, item.reference_id),
+    nomeDestinatario: primeiro(item.recipientName, item.recipient?.name),
+    documentoDestinatario: primeiro(item.recipientDocument, item.recipient?.document)
+  };
+}
+
+async function enriquecerPagamentoComItem(pagamento) {
+  if (!pagamento?.batchId) return pagamento;
+  try {
+    const resposta = await listarItensPayout(pagamento.batchId);
+    const itens = listaDeItens(resposta);
+    if (!itens.length) return pagamento;
+
+    // O referenceId enviado na criação do payout é o ID interno do pagamento.
+    const item = itens.find(candidato => {
+      const ids = extrairIdsDoItem(candidato);
+      return [ids.externalRef, candidato.referenceId, candidato.reference_id]
+        .filter(Boolean)
+        .some(valor => String(valor) === String(pagamento.id));
+    }) || itens[0];
+
+    const ids = extrairIdsDoItem(item);
+    atualizarPagamento(pagamento.id, {
+      payoutId: ids.payoutId || pagamento.payoutId,
+      endToEndId: ids.endToEndId || pagamento.endToEndId,
+      providerTransactionId: ids.providerTransactionId || pagamento.providerTransactionId,
+      providerChargeId: ids.providerChargeId || pagamento.providerChargeId,
+      pixTxid: ids.pixTxid || pagamento.pixTxid,
+      externalRef: ids.externalRef || pagamento.externalRef,
+      nomeDestinatario: ids.nomeDestinatario || pagamento.nomeDestinatario,
+      documentoDestinatario: ids.documentoDestinatario || pagamento.documentoDestinatario
+    });
+    return obterPagamento(pagamento.id);
+  } catch (erro) {
+    // O comprovante ainda tentará os IDs já salvos. O erro detalhado fica no log.
+    console.warn(`Não foi possível listar itens do lote ${pagamento.batchId}:`, erro.code || erro.message);
+    return pagamento;
+  }
 }
 
 function identificadoresDoPagamento(pagamento) {
@@ -91,6 +150,10 @@ async function obterPdfOficial(pagamento) {
 async function enviarComprovantePagamento({ client, paymentId, user = null }) {
   let pagamento = obterPagamento(paymentId);
   if (!pagamento || pagamento.status !== "concluido") return { enviado: false, motivo: "PAGAMENTO_NAO_CONCLUIDO" };
+
+  // A consulta do lote traz apenas contadores. Buscamos os itens do lote para
+  // obter o payout item/endToEnd/providerTransaction usados pelo comprovante.
+  pagamento = await enriquecerPagamentoComItem(pagamento);
   if (pagamento.comprovanteEnviadoEm) return { enviado: false, motivo: "JA_ENVIADO" };
   if (!identificadoresDoPagamento(pagamento).length) return { enviado: false, motivo: "IDENTIFICADOR_COMPROVANTE_AINDA_NAO_DISPONIVEL" };
 

@@ -112,6 +112,28 @@ async function consultarPayout(batchId) {
 }
 
 
+async function listarItensPayout(batchId) {
+  if (!batchId) throw new Error("BATCH_ID_NAO_INFORMADO");
+
+  // Endpoint oficial de itens do lote. A listagem de lotes retorna apenas
+  // contadores (paidItems/failedItems), não os objetos das transações.
+  const caminhos = [
+    `/v1/payouts/batches/${encodeURIComponent(batchId)}/items`,
+    `/v1/payouts/batches/${encodeURIComponent(batchId)}/payout-items`
+  ];
+
+  let ultimoErro = null;
+  for (const path of caminhos) {
+    try {
+      return await requisicaoTurbofy({ method: "GET", path });
+    } catch (erro) {
+      ultimoErro = erro;
+      if (![404, 405].includes(erro.status)) throw erro;
+    }
+  }
+  throw ultimoErro || new Error("ITENS_DO_LOTE_NAO_ENCONTRADOS");
+}
+
 async function baixarComprovanteTransacao(transactionId) {
   if (!transactionId) throw new Error("TRANSACTION_ID_NAO_INFORMADO");
   const id = encodeURIComponent(String(transactionId));
@@ -139,5 +161,6 @@ module.exports = {
   criarPayout,
   consultarPayout,
   listarPayouts,
+  listarItensPayout,
   baixarComprovanteTransacao
 };
