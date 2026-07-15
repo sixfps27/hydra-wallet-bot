@@ -121,17 +121,53 @@ async function aguardarResultadoPayout(batchId, { intervalosMs } = {}) {
 
 function extrairDadosPayout(consulta = {}) {
   const item = Array.isArray(consulta.items) ? consulta.items[0] || {} : {};
-  const primeiro = (...valores) => valores.find(valor => valor !== undefined && valor !== null && String(valor).trim() !== "") || null;
+  const primeiro = (...valores) => valores.find(valor =>
+    valor !== undefined && valor !== null && String(valor).trim() !== ""
+  ) || null;
+
   return {
-    nomeDestinatario: primeiro(item.recipientName, consulta.recipientName),
-    documentoDestinatario: primeiro(item.recipientDocument, consulta.recipientDocument),
-    payoutId: primeiro(item.id, item.payoutItemId, consulta.payoutId, consulta.payoutItemId),
-    endToEndId: primeiro(item.endToEndId, item.endToEnd, item.e2eId, consulta.endToEndId, consulta.endToEnd, consulta.e2eId),
-    providerTransactionId: primeiro(item.providerTransactionId, item.provider_transaction_id, item.transactionId, consulta.providerTransactionId, consulta.provider_transaction_id, consulta.transactionId),
-    providerChargeId: primeiro(item.providerChargeId, item.provider_charge_id, item.chargeId, consulta.providerChargeId, consulta.provider_charge_id, consulta.chargeId),
-    pixTxid: primeiro(item.pixTxid, item.pix_txid, item.txid, consulta.pixTxid, consulta.pix_txid, consulta.txid),
-    externalRef: primeiro(item.externalRef, item.external_ref, item.referenceId, consulta.externalRef, consulta.external_ref, consulta.referenceId),
-    liquidadoEm: primeiro(item.settledAt, item.completedAt, consulta.settledAt, consulta.completedAt)
+    nomeDestinatario: primeiro(
+      item.recipientName, item.recipient?.name,
+      consulta.recipientName, consulta.recipient?.name
+    ),
+    documentoDestinatario: primeiro(
+      item.recipientDocument, item.recipient?.document,
+      consulta.recipientDocument, consulta.recipient?.document
+    ),
+    payoutId: primeiro(
+      item.id, item.payoutItemId, item.payout_item_id,
+      consulta.payoutId, consulta.payoutItemId, consulta.payout_item_id
+    ),
+    endToEndId: primeiro(
+      item.endToEndId, item.endToEnd, item.e2eId, item.end_to_end_id,
+      consulta.endToEndId, consulta.endToEnd, consulta.e2eId, consulta.end_to_end_id
+    ),
+    providerTransactionId: primeiro(
+      item.providerTransactionId, item.provider_transaction_id,
+      item.transactionId, item.transaction_id,
+      consulta.providerTransactionId, consulta.provider_transaction_id,
+      consulta.transactionId, consulta.transaction_id
+    ),
+    providerChargeId: primeiro(
+      item.providerChargeId, item.provider_charge_id,
+      item.chargeId, item.charge_id,
+      consulta.providerChargeId, consulta.provider_charge_id,
+      consulta.chargeId, consulta.charge_id
+    ),
+    pixTxid: primeiro(
+      item.pixTxid, item.pix_txid, item.txid, item.pix?.txid,
+      consulta.pixTxid, consulta.pix_txid, consulta.txid, consulta.pix?.txid
+    ),
+    externalRef: primeiro(
+      item.externalRef, item.external_ref, item.externalReference,
+      item.referenceId, item.reference_id,
+      consulta.externalRef, consulta.external_ref, consulta.externalReference,
+      consulta.referenceId, consulta.reference_id
+    ),
+    liquidadoEm: primeiro(
+      item.settledAt, item.completedAt, item.settled_at, item.completed_at,
+      consulta.settledAt, consulta.completedAt, consulta.settled_at, consulta.completed_at
+    )
   };
 }
 
@@ -483,7 +519,11 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
           nomeDestinatario: dadosPayout.nomeDestinatario || pagamento.nomeDestinatario,
           documentoDestinatario: dadosPayout.documentoDestinatario || pagamento.documentoDestinatario,
           payoutId: dadosPayout.payoutId,
-          endToEndId: dadosPayout.endToEndId
+          endToEndId: dadosPayout.endToEndId,
+          providerTransactionId: dadosPayout.providerTransactionId,
+          providerChargeId: dadosPayout.providerChargeId,
+          pixTxid: dadosPayout.pixTxid,
+          externalRef: dadosPayout.externalRef || pagamento.id
         });
 
         if (resultadoFinal.tipo === "sucesso") {
