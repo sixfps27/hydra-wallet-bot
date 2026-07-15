@@ -112,79 +112,19 @@ async function consultarPayout(batchId) {
 }
 
 
-async function baixarComprovanteTransacao(identificador) {
-  if (!identificador) throw new Error("IDENTIFICADOR_COMPROVANTE_NAO_INFORMADO");
-
-  const id = encodeURIComponent(String(identificador).trim());
+async function baixarComprovanteTransacao(transactionId) {
+  if (!transactionId) throw new Error("TRANSACTION_ID_NAO_INFORMADO");
+  const id = encodeURIComponent(String(transactionId));
   const path = `/v1/receipts/transactions/${id}`;
   const { clientId, clientSecret } = credenciais();
-  if (!clientId || !clientSecret) throw new Error("CREDENCIAIS_TURBOFY_AUSENTES");
-
   const timestamp = Date.now().toString();
-  const headers = {
-    Accept: "application/pdf",
-    "x-client-id": clientId,
-    "x-client-secret": clientSecret,
-    "x-turbofy-timestamp": timestamp,
-    "x-turbofy-signature": criarAssinatura({
-      method: "GET",
-      path,
-      timestamp,
-      rawBody: "",
-      clientSecret
-    })
-  };
-
+  const headers = { Accept: "application/pdf", "x-client-id": clientId, "x-client-secret": clientSecret, "x-turbofy-timestamp": timestamp, "x-turbofy-signature": criarAssinatura({ method: "GET", path, timestamp, rawBody: "", clientSecret }) };
   const resposta = await fetch(`${API_URL}${path}`, { method: "GET", headers });
-
-  if (!resposta.ok) {
-    const contentType = resposta.headers.get("content-type") || "";
-    let detalhes = "";
-    let code = "TURBOFY_RECEIPT_ERROR";
-
-    try {
-      if (contentType.includes("application/json")) {
-        const json = await resposta.json();
-        code = json?.error?.code || json?.code || code;
-        detalhes = JSON.stringify(json).slice(0, 1500);
-      } else {
-        detalhes = (await resposta.text()).slice(0, 1500);
-      }
-    } catch {}
-
-    const erro = new Error(`ERRO_COMPROVANTE_TURBOFY_HTTP_${resposta.status}`);
-    erro.status = resposta.status;
-    erro.code = code;
-    erro.details = detalhes;
-    throw erro;
-  }
-
-  const contentType = resposta.headers.get("content-type") || "";
-  if (!contentType.toLowerCase().includes("application/pdf")) {
-    const texto = await resposta.text().catch(() => "");
-    const erro = new Error("RESPOSTA_COMPROVANTE_NAO_E_PDF");
-    erro.details = texto.slice(0, 1000);
-    throw erro;
-  }
-
-  const arrayBuffer = await resposta.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  if (buffer.length < 100 || buffer.subarray(0, 4).toString() !== "%PDF") {
-    throw new Error("PDF_COMPROVANTE_INVALIDO");
-  }
-
-  const disposition = resposta.headers.get("content-disposition") || "";
-  const match = disposition.match(/filename\*?=(?:UTF-8''|\")?([^\";]+)/i);
-  const nomeArquivo = match
-    ? decodeURIComponent(match[1].replace(/\"/g, "").trim())
-    : `comprovante-transacao-${id}.pdf`;
-
-  return { buffer, nomeArquivo, contentType, identificador: String(identificador) };
-}
-
-// Mantido como alias para não quebrar chamadas antigas.
-async function baixarComprovantePayout(identificador) {
-  return baixarComprovanteTransacao(identificador);
+  if (!resposta.ok) { const texto = await resposta.text().catch(()=>""); let dados={}; try{dados=texto?JSON.parse(texto):{}}catch{dados={raw:texto}}; const erro=new Error(dados?.error?.message||dados?.message||`ERRO_COMPROVANTE_TURBOFY_HTTP_${resposta.status}`); erro.status=resposta.status; erro.code=dados?.error?.code||dados?.code||`HTTP_${resposta.status}`; erro.details=dados; throw erro; }
+  const contentType=resposta.headers.get("content-type")||""; if(!contentType.toLowerCase().includes("application/pdf")) throw new Error("RESPOSTA_COMPROVANTE_NAO_E_PDF");
+  const buffer=Buffer.from(await resposta.arrayBuffer()); if(buffer.subarray(0,4).toString()!=="%PDF") throw new Error("PDF_COMPROVANTE_INVALIDO");
+  const disposition=resposta.headers.get("content-disposition")||""; const match=disposition.match(/filename\*?=(?:UTF-8''|\")?([^";]+)/i); const nomeArquivo=match?decodeURIComponent(match[1].replace(/"/g,"").trim()):`comprovante-transacao-${transactionId}.pdf`;
+  return { buffer, nomeArquivo, contentType };
 }
 
 async function listarPayouts() {
@@ -199,6 +139,5 @@ module.exports = {
   criarPayout,
   consultarPayout,
   listarPayouts,
-  baixarComprovantePayout,
   baixarComprovanteTransacao
 };

@@ -30,8 +30,11 @@ function identificadoresDoPagamento(pagamento) {
   // pois é o identificador Pix mais estável quando já está disponível.
   return [
     pagamento.endToEndId,
+    pagamento.providerTransactionId,
+    pagamento.pixTxid,
+    pagamento.providerChargeId,
+    pagamento.externalRef,
     pagamento.payoutId,
-    pagamento.batchId,
     pagamento.id
   ].filter((valor, indice, lista) => valor && lista.indexOf(valor) === indice);
 }
@@ -66,7 +69,7 @@ async function baixarComTentativas(pagamento) {
 async function obterPdfOficial(pagamento) {
   garantirPastaComprovantes();
 
-  const identificadorCache = pagamento.endToEndId || pagamento.payoutId || pagamento.batchId || pagamento.id;
+  const identificadorCache = pagamento.endToEndId || pagamento.providerTransactionId || pagamento.pixTxid || pagamento.providerChargeId || pagamento.externalRef || pagamento.payoutId || pagamento.id;
   const nomeCache = nomeSeguro(
     `comprovante-${pagamento.codigoHydra || pagamento.id}-${identificadorCache}.pdf`,
     `comprovante-${pagamento.id}.pdf`

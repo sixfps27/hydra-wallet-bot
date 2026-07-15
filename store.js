@@ -79,6 +79,10 @@ adicionarColunaSeFaltar("payments", "gateway_batch_id", "TEXT");
 adicionarColunaSeFaltar("payments", "gateway_status", "TEXT");
 adicionarColunaSeFaltar("payments", "gateway_payout_id", "TEXT");
 adicionarColunaSeFaltar("payments", "end_to_end_id", "TEXT");
+adicionarColunaSeFaltar("payments", "provider_transaction_id", "TEXT");
+adicionarColunaSeFaltar("payments", "provider_charge_id", "TEXT");
+adicionarColunaSeFaltar("payments", "pix_txid", "TEXT");
+adicionarColunaSeFaltar("payments", "external_ref", "TEXT");
 adicionarColunaSeFaltar("payments", "receipt_sent_at", "INTEGER");
 adicionarColunaSeFaltar("deposits", "provider_fee_cents", "INTEGER NOT NULL DEFAULT 0");
 adicionarColunaSeFaltar("deposits", "admin_fee_cents", "INTEGER NOT NULL DEFAULT 0");
@@ -151,11 +155,11 @@ function criarPagamento({ usuarioId, chave, valor, nomeDestinatario="Destinatár
 function obterPagamento(id) {
   const p = db.prepare(`SELECT * FROM payments WHERE id=?`).get(id);
   if (!p) return null;
-  return { id:p.id, usuarioId:p.user_id, chave:p.pix_key, nomeDestinatario:p.recipient_name, documentoDestinatario:p.recipient_document, valor:paraReais(p.amount_cents), status:p.status, codigoHydra:p.hydra_code, batchId:p.gateway_batch_id, gatewayStatus:p.gateway_status, payoutId:p.gateway_payout_id, endToEndId:p.end_to_end_id, criadoEm:p.created_at, concluidoEm:p.completed_at, comprovanteEnviadoEm:p.receipt_sent_at };
+  return { id:p.id, usuarioId:p.user_id, chave:p.pix_key, nomeDestinatario:p.recipient_name, documentoDestinatario:p.recipient_document, valor:paraReais(p.amount_cents), status:p.status, codigoHydra:p.hydra_code, batchId:p.gateway_batch_id, gatewayStatus:p.gateway_status, payoutId:p.gateway_payout_id, endToEndId:p.end_to_end_id, providerTransactionId:p.provider_transaction_id, providerChargeId:p.provider_charge_id, pixTxid:p.pix_txid, externalRef:p.external_ref, criadoEm:p.created_at, concluidoEm:p.completed_at, comprovanteEnviadoEm:p.receipt_sent_at };
 }
 
 function atualizarPagamento(id, campos={}) {
-  const permitidos = { status:"status", batchId:"gateway_batch_id", gatewayStatus:"gateway_status", payoutId:"gateway_payout_id", endToEndId:"end_to_end_id", concluidoEm:"completed_at", nomeDestinatario:"recipient_name", documentoDestinatario:"recipient_document" };
+  const permitidos = { status:"status", batchId:"gateway_batch_id", gatewayStatus:"gateway_status", payoutId:"gateway_payout_id", endToEndId:"end_to_end_id", providerTransactionId:"provider_transaction_id", providerChargeId:"provider_charge_id", pixTxid:"pix_txid", externalRef:"external_ref", concluidoEm:"completed_at", nomeDestinatario:"recipient_name", documentoDestinatario:"recipient_document" };
   const sets=[], vals=[];
   for (const [k,v] of Object.entries(campos)) if (permitidos[k]) { sets.push(`${permitidos[k]}=?`); vals.push(v); }
   if (sets.length) db.prepare(`UPDATE payments SET ${sets.join(",")} WHERE id=?`).run(...vals,id);
