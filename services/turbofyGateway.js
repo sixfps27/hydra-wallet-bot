@@ -62,6 +62,8 @@ async function requisicaoTurbofy({ method, path, body, idempotencyKey, usarAssin
     erro.status = resposta.status;
     erro.code = dados?.error?.code || dados?.code || "TURBOFY_API_ERROR";
     erro.details = dados;
+    const retryAfter = resposta.headers.get("retry-after");
+    if (retryAfter) erro.retryAfterMs = /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now());
     throw erro;
   }
 
@@ -85,8 +87,8 @@ async function consultarCobrancaPix(id) {
   });
 }
 
-async function criarPayout({ pixKey, pixKeyType, amountCents, recipientName, recipientDocument, referenceId, description, metadata }) {
-  const idempotencyKey = crypto.randomUUID();
+async function criarPayout({ pixKey, pixKeyType, amountCents, recipientName, recipientDocument, referenceId, description, metadata, idempotencyKey }) {
+  idempotencyKey = idempotencyKey || crypto.randomUUID();
   return requisicaoTurbofy({
     method: "POST",
     path: "/v1/payouts/batches",

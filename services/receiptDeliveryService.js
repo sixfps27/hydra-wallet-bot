@@ -6,7 +6,7 @@ const { promisify } = require("util");
 const { AttachmentBuilder, EmbedBuilder } = require("discord.js");
 const { garantirPerfilECanalPrivado } = require("./profileChannelService");
 const { consultarPayout, baixarPdfPorEndpoint, baixarComprovanteTransacao } = require("./turbofyGateway");
-const { obterPagamento, atualizarPagamento, marcarComprovanteEnviado } = require("../store");
+const { obterPagamento, atualizarPagamento, reivindicarEnvioComprovante, marcarComprovanteEnviado, liberarReivindicacaoComprovante } = require("../store");
 
 const RECEIPTS_DIR = path.join(__dirname, "..", "receipts");
 const consultasEmAndamento = new Map();
@@ -160,15 +160,17 @@ async function enviarComprovantePagamento({ client, paymentId, user = null }) {
     return { enviado: false, motivo: "PAGAMENTO_NAO_CONCLUIDO" };
   }
   if (pagamento.comprovanteEnviadoEm) return { enviado: false, motivo: "JA_ENVIADO" };
+  if (!reivindicarEnvioComprovante(paymentId)) return { enviado: false, motivo: "JA_EM_PROCESSAMENTO" };
 
+  try {
   const usuario = user || await client.users.fetch(pagamento.usuarioId).catch(() => null);
-  if (!usuario) return { enviado: false, motivo: "USUARIO_NAO_ENCONTRADO" };
+  if (!usuario) { liberarReivindicacaoComprovante(paymentId); return { enviado: false, motivo: "USUARIO_NAO_ENCONTRADO" }; }
 
   const { canal } = await garantirPerfilECanalPrivado({ client, user: usuario });
-  if (!canal?.isTextBased()) return { enviado: false, motivo: "CANAL_PRIVADO_NAO_DISPONIVEL" };
+  if (!canal?.isTextBased()) { liberarReivindicacaoComprovante(paymentId); return { enviado: false, motivo: "CANAL_PRIVADO_NAO_DISPONIVEL" }; }
 
   pagamento = obterPagamento(paymentId);
-  if (pagamento.comprovanteEnviadoEm) return { enviado: false, motivo: "JA_ENVIADO" };
+  if (pagamento.comprovanteEnviadoEm) { liberarReivindicacaoComprovante(paymentId); return { enviado: false, motivo: "JA_ENVIADO" }; }
 
   const pdf = await obterPdfOficial(pagamento);
   pagamento = pdf.pagamento || obterPagamento(paymentId);
@@ -220,6 +222,10 @@ async function enviarComprovantePagamento({ client, paymentId, user = null }) {
   await canal.send({ embeds: [embed], files: arquivos });
   marcarComprovanteEnviado(paymentId);
   return { enviado: true, canalId: canal.id, oficial: true, cache: pdf.cache };
+  } catch (erro) {
+    liberarReivindicacaoComprovante(paymentId);
+    throw erro;
+  }
 }
 
 module.exports = { enviarComprovantePagamento };

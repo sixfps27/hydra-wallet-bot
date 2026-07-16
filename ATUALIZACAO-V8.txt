@@ -1,0 +1,14 @@
+HYDRA SYSTEMS V8.0 - SEGURANÇA E ANÁLISE INTELIGENTE
+
+- Fila global para chamadas de criação de payout.
+- Apenas uma nova tentativa após no mínimo 60 segundos em erros permitidos.
+- Mesma chave de idempotência nas duas tentativas.
+- Tratamento de HTTP 429 e Retry-After.
+- Um único monitor por pagamento.
+- Status do Discord atualizado automaticamente.
+- Aviso após 30 segundos em análise.
+- Trava por usuário + chave Pix enquanto houver pagamento ativo.
+- Trava atômica no banco contra comprovante duplicado.
+- Reconciliação sem ciclos sobrepostos e com intervalo mínimo de 15 segundos.
+
+Não substitua .env nem hydra-wallet.db durante a instalação.

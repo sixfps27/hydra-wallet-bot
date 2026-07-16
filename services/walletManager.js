@@ -3,6 +3,7 @@ const {
   consultarPagamento,
   estaNoModoTeste
 } = require("./paymentGateway");
+const { executarPayoutSeguro } = require("./payoutSecurityService");
 
 /*
  * Descobre automaticamente o tipo da chave Pix.
@@ -57,7 +58,8 @@ async function processarEnvioPix({
   valor,
   nomeDestinatario = "Destinatário",
   documentoDestinatario = "00000000000",
-  referencia
+  referencia,
+  onRetryAgendado
 }) {
   if (!usuarioId) {
     throw new Error("USUARIO_NAO_INFORMADO");
@@ -74,14 +76,19 @@ async function processarEnvioPix({
   const tipoChave = descobrirTipoChavePix(chavePix);
   const valorCentavos = converterParaCentavos(valor);
 
-  const resultado = await enviarPix({
-    pixKey: chavePix.trim(),
-    pixKeyType: tipoChave,
-    amountCents: valorCentavos,
-    recipientName: nomeDestinatario,
-    recipientDocument: documentoDestinatario,
-    referenceId: referencia,
-    discordUserId: usuarioId
+  const resultado = await executarPayoutSeguro({
+    paymentId: referencia,
+    onRetryAgendado,
+    executar: ({ idempotencyKey }) => enviarPix({
+      pixKey: chavePix.trim(),
+      pixKeyType: tipoChave,
+      amountCents: valorCentavos,
+      recipientName: nomeDestinatario,
+      recipientDocument: documentoDestinatario,
+      referenceId: referencia,
+      discordUserId: usuarioId,
+      idempotencyKey
+    })
   });
 
   return {

@@ -84,6 +84,11 @@ adicionarColunaSeFaltar("payments", "provider_charge_id", "TEXT");
 adicionarColunaSeFaltar("payments", "pix_txid", "TEXT");
 adicionarColunaSeFaltar("payments", "external_ref", "TEXT");
 adicionarColunaSeFaltar("payments", "receipt_sent_at", "INTEGER");
+adicionarColunaSeFaltar("payments", "receipt_claimed_at", "INTEGER");
+adicionarColunaSeFaltar("payments", "idempotency_key", "TEXT");
+adicionarColunaSeFaltar("payments", "retry_count", "INTEGER NOT NULL DEFAULT 0");
+adicionarColunaSeFaltar("payments", "retry_after", "INTEGER");
+adicionarColunaSeFaltar("payments", "analysis_notified_at", "INTEGER");
 adicionarColunaSeFaltar("deposits", "provider_fee_cents", "INTEGER NOT NULL DEFAULT 0");
 adicionarColunaSeFaltar("deposits", "admin_fee_cents", "INTEGER NOT NULL DEFAULT 0");
 
@@ -155,11 +160,11 @@ function criarPagamento({ usuarioId, chave, valor, nomeDestinatario="Destinatár
 function obterPagamento(id) {
   const p = db.prepare(`SELECT * FROM payments WHERE id=?`).get(id);
   if (!p) return null;
-  return { id:p.id, usuarioId:p.user_id, chave:p.pix_key, nomeDestinatario:p.recipient_name, documentoDestinatario:p.recipient_document, valor:paraReais(p.amount_cents), status:p.status, codigoHydra:p.hydra_code, batchId:p.gateway_batch_id, gatewayStatus:p.gateway_status, payoutId:p.gateway_payout_id, endToEndId:p.end_to_end_id, providerTransactionId:p.provider_transaction_id, providerChargeId:p.provider_charge_id, pixTxid:p.pix_txid, externalRef:p.external_ref, criadoEm:p.created_at, concluidoEm:p.completed_at, comprovanteEnviadoEm:p.receipt_sent_at };
+  return { id:p.id, usuarioId:p.user_id, chave:p.pix_key, nomeDestinatario:p.recipient_name, documentoDestinatario:p.recipient_document, valor:paraReais(p.amount_cents), status:p.status, codigoHydra:p.hydra_code, batchId:p.gateway_batch_id, gatewayStatus:p.gateway_status, payoutId:p.gateway_payout_id, endToEndId:p.end_to_end_id, providerTransactionId:p.provider_transaction_id, providerChargeId:p.provider_charge_id, pixTxid:p.pix_txid, externalRef:p.external_ref, criadoEm:p.created_at, concluidoEm:p.completed_at, comprovanteEnviadoEm:p.receipt_sent_at, comprovanteEmProcessamentoEm:p.receipt_claimed_at, idempotencyKey:p.idempotency_key, retryCount:Number(p.retry_count||0), retryAfter:p.retry_after, analiseAvisadaEm:p.analysis_notified_at };
 }
 
 function atualizarPagamento(id, campos={}) {
-  const permitidos = { status:"status", batchId:"gateway_batch_id", gatewayStatus:"gateway_status", payoutId:"gateway_payout_id", endToEndId:"end_to_end_id", providerTransactionId:"provider_transaction_id", providerChargeId:"provider_charge_id", pixTxid:"pix_txid", externalRef:"external_ref", concluidoEm:"completed_at", nomeDestinatario:"recipient_name", documentoDestinatario:"recipient_document" };
+  const permitidos = { status:"status", batchId:"gateway_batch_id", gatewayStatus:"gateway_status", payoutId:"gateway_payout_id", endToEndId:"end_to_end_id", providerTransactionId:"provider_transaction_id", providerChargeId:"provider_charge_id", pixTxid:"pix_txid", externalRef:"external_ref", concluidoEm:"completed_at", nomeDestinatario:"recipient_name", documentoDestinatario:"recipient_document", idempotencyKey:"idempotency_key", retryCount:"retry_count", retryAfter:"retry_after", analiseAvisadaEm:"analysis_notified_at" };
   const sets=[], vals=[];
   for (const [k,v] of Object.entries(campos)) if (permitidos[k]) { sets.push(`${permitidos[k]}=?`); vals.push(v); }
   if (sets.length) db.prepare(`UPDATE payments SET ${sets.join(",")} WHERE id=?`).run(...vals,id);
@@ -244,20 +249,49 @@ function corrigirPagamentoConcluidoAposEstorno(pagamento, batchId, gatewayStatus
   return obterPagamento(pagamento.id);
 }
 
+function reivindicarEnvioComprovante(paymentId, validadeMs = 5 * 60 * 1000) {
+  const agora = Date.now();
+  const limite = agora - validadeMs;
+  const resultado = db.prepare(`
+    UPDATE payments
+    SET receipt_claimed_at=?
+    WHERE id=?
+      AND receipt_sent_at IS NULL
+      AND (receipt_claimed_at IS NULL OR receipt_claimed_at < ?)
+  `).run(agora, paymentId, limite);
+  return resultado.changes > 0;
+}
+
 function marcarComprovanteEnviado(paymentId) {
   const agora = Date.now();
   const resultado = db.prepare(`
     UPDATE payments
-    SET receipt_sent_at=?
+    SET receipt_sent_at=?, receipt_claimed_at=NULL
     WHERE id=? AND receipt_sent_at IS NULL
   `).run(agora, paymentId);
   return resultado.changes > 0;
 }
 
 function liberarComprovanteParaReenvio(paymentId) {
-  db.prepare(`UPDATE payments SET receipt_sent_at=NULL WHERE id=?`).run(paymentId);
+  db.prepare(`UPDATE payments SET receipt_sent_at=NULL, receipt_claimed_at=NULL WHERE id=?`).run(paymentId);
   return obterPagamento(paymentId);
 }
+
+function liberarReivindicacaoComprovante(paymentId) {
+  db.prepare(`UPDATE payments SET receipt_claimed_at=NULL WHERE id=? AND receipt_sent_at IS NULL`).run(paymentId);
+}
+
+function obterPagamentoAtivoPorUsuarioChave(userId, chave, excluirId = null) {
+  const limiteConfirmacao = Date.now() - 10 * 60 * 1000;
+  const sql = `SELECT id FROM payments
+    WHERE user_id=? AND pix_key=?
+      AND (status='processando' OR (status='aguardando_confirmacao' AND created_at>=?))
+      AND (? IS NULL OR id<>?)
+    ORDER BY created_at DESC LIMIT 1`;
+  const row = db.prepare(sql).get(userId, chave, limiteConfirmacao, excluirId, excluirId);
+  return row ? obterPagamento(row.id) : null;
+}
+
 
 function listarPagamentosReconciliaveis() {
   return db.prepare(`
@@ -414,6 +448,9 @@ module.exports = {
   definirCooldown,
   obterCooldown,
   limparCooldown,
+  reivindicarEnvioComprovante,
   marcarComprovanteEnviado,
-  liberarComprovanteParaReenvio
+  liberarComprovanteParaReenvio,
+  liberarReivindicacaoComprovante,
+  obterPagamentoAtivoPorUsuarioChave
 };

@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ApplicationIntegrationType, InteractionContextType } = require("discord.js");
-const { obterCarteira, criarPagamento, obterCooldown, definirCooldown } = require("../store");
+const { obterCarteira, criarPagamento, obterCooldown, definirCooldown, obterPagamentoAtivoPorUsuarioChave } = require("../store");
 const { converterValor, formatarDinheiro } = require("../utils/money");
 const { chavePixValida, normalizarChavePix } = require("../utils/pix");
 const { criarConfirmacao } = require("../views/confirmacaoView");
@@ -15,6 +15,8 @@ async function preparar(interaction,chave,valor){
  const cooldown = obterCooldown(interaction.user.id, "pix_send");
  if(cooldown.ativo) return interaction.reply({content:mensagemCooldown(cooldown),flags:MessageFlags.Ephemeral});
  chave=normalizarChavePix(chave);
+ const ativo = obterPagamentoAtivoPorUsuarioChave(interaction.user.id, chave);
+ if (ativo) return interaction.reply({content:"Já existe um Pix para essa mesma chave em confirmação ou análise. **Não faça outro pagamento agora.** Aguarde a conclusão automática.",flags:MessageFlags.Ephemeral});
  if(!chavePixValida(chave)) {
    definirCooldown(interaction.user.id, "pix_send", Number(process.env.PIX_ERROR_COOLDOWN_MS || 60000), "invalid_pix_key");
    return interaction.reply({content:"Chave Pix inválida. Por segurança, aguarde **1 minuto** antes de tentar novamente.",flags:MessageFlags.Ephemeral});

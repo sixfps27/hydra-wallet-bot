@@ -5,6 +5,7 @@ const {
   criarPayout,
   consultarPayout
 } = require("./turbofyGateway");
+const { enfileirar } = require("./payoutSecurityService");
 
 function obterModoPagamento() {
   return process.env.PAYMENT_MODE || "mock";
@@ -21,7 +22,8 @@ async function enviarPix({
   recipientName,
   recipientDocument,
   referenceId,
-  discordUserId
+  discordUserId,
+  idempotencyKey
 }) {
   if (estaNoModoTeste()) {
     const batchId =
@@ -53,7 +55,8 @@ async function enviarPix({
     description: "Pagamento Hydra Wallet",
     metadata: {
       discordUserId
-    }
+    },
+    idempotencyKey
   });
 }
 
@@ -71,7 +74,7 @@ async function consultarPagamento(batchId) {
     };
   }
 
-  return consultarPayout(batchId);
+  return enfileirar(() => consultarPayout(batchId));
 }
 
 module.exports = {

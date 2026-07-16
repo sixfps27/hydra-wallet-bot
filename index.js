@@ -25,6 +25,7 @@ const {
 const { processarEnvioPix, verificarEnvioPix } = require("./services/walletManager");
 const { criarCobrancaPix, consultarCobrancaPix } = require("./services/turbofyGateway");
 const { enviarComprovantePagamento } = require("./services/receiptDeliveryService");
+const { monitorar: monitorarPagamento, estaMonitorando } = require("./services/paymentMonitorService");
 
 if (!process.env.TOKEN) {
   console.error("TOKEN não encontrado no .env");
@@ -172,54 +173,21 @@ function extrairDadosPayout(consulta = {}) {
 }
 
 async function reconciliarPagamento(pagamento) {
-  if (!pagamento?.batchId || !["processando", "falhou"].includes(pagamento.status)) return null;
-
-  const consulta = await verificarEnvioPix(pagamento.batchId);
-  const resultado = normalizarStatusPayout(consulta);
-  const dadosPayout = extrairDadosPayout(consulta);
-  atualizarPagamento(pagamento.id, {
-    gatewayStatus: resultado.status,
-    nomeDestinatario: dadosPayout.nomeDestinatario || pagamento.nomeDestinatario,
-    documentoDestinatario: dadosPayout.documentoDestinatario || pagamento.documentoDestinatario,
-    payoutId: dadosPayout.payoutId,
-    endToEndId: dadosPayout.endToEndId,
-    providerTransactionId: dadosPayout.providerTransactionId,
-    providerChargeId: dadosPayout.providerChargeId,
-    pixTxid: dadosPayout.pixTxid,
-    externalRef: dadosPayout.externalRef
-  });
-
-  if (resultado.tipo === "sucesso") {
-    const atual = obterPagamento(pagamento.id);
-    if (atual.status === "falhou") {
-      console.warn(`Corrigindo estorno indevido do pagamento ${pagamento.id}.`);
-      const corrigido = corrigirPagamentoConcluidoAposEstorno(atual, pagamento.batchId, resultado.status);
-      enviarComprovantePagamento({ client, paymentId: corrigido.id }).catch(erro => console.error("Erro ao enviar comprovante reconciliado:", erro.message));
-      return corrigido;
-    }
-    const concluido = concluirPagamento(atual, pagamento.batchId, resultado.status);
-    enviarComprovantePagamento({ client, paymentId: concluido.id }).catch(erro => console.error("Erro ao enviar comprovante reconciliado:", erro.message));
-    return concluido;
-  }
-
-  if (resultado.tipo === "falha" && pagamento.status === "processando") {
-    const falhado = falharPagamento(obterPagamento(pagamento.id), resultado.status);
-    aplicarCooldownDeErro(pagamento.usuarioId, resultado.status);
-    return falhado;
-  }
-
-  return obterPagamento(pagamento.id);
+  if (!pagamento?.batchId || pagamento.status !== "processando" || estaMonitorando(pagamento.id)) return pagamento;
+  return monitorarPagamento({ client, paymentId: pagamento.id });
 }
 
+let reconciliacaoEmAndamento = false;
 async function reconciliarPagamentosPendentes() {
+  if (reconciliacaoEmAndamento) return;
+  reconciliacaoEmAndamento = true;
   const pendentes = listarPagamentosReconciliaveis();
-  for (const pagamento of pendentes) {
-    try {
-      await reconciliarPagamento(pagamento);
-    } catch (erro) {
-      console.error(`Erro ao reconciliar pagamento ${pagamento.id}:`, erro.code || erro.message);
+  try {
+    for (const pagamento of pendentes) {
+      try { reconciliarPagamento(pagamento).catch(erro => console.error(`Erro ao reconciliar pagamento ${pagamento.id}:`, erro.code || erro.message)); }
+      catch (erro) { console.error(`Erro ao iniciar reconciliação ${pagamento.id}:`, erro.code || erro.message); }
     }
-  }
+  } finally { reconciliacaoEmAndamento = false; }
 }
 
 async function confirmarDepositoPago(depositoId) {
@@ -262,7 +230,7 @@ client.once(Events.ClientReady, bot => {
     console.error("Erro na reconciliação inicial:", erro);
   });
 
-  const intervalo = Number(process.env.PAYOUT_RECONCILE_INTERVAL_MS || 5000);
+  const intervalo = Math.max(15000, Number(process.env.PAYOUT_RECONCILE_INTERVAL_MS || 30000));
   setInterval(() => {
     reconciliarPagamentosPendentes().catch(erro => {
       console.error("Erro na reconciliação periódica:", erro);
@@ -506,55 +474,43 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
           valor: pagamento.valor,
           nomeDestinatario: pagamento.nomeDestinatario,
           documentoDestinatario: pagamento.documentoDestinatario || process.env.TURBOFY_FALLBACK_RECIPIENT_DOCUMENT || "00000000000",
-          referencia: pagamento.id
+          referencia: pagamento.id,
+          onRetryAgendado: async ({ esperaMs }) => {
+            await interaction.editReply({
+              embeds: [new EmbedBuilder().setColor("#F59E0B").setTitle("Nova tentativa agendada").setDescription(`A primeira tentativa não foi aceita. Por segurança da API, aguardaremos **${Math.ceil(esperaMs/1000)} segundos** antes da única nova tentativa. Não faça outro pagamento.`).setFooter({ text: "Hydra Wallet" })],
+              components: []
+            }).catch(() => {});
+          }
         });
         const batchId = resultado.batchId;
         atualizarPagamento(id, { batchId, gatewayStatus: resultado.status || "processing" });
 
-        const resultadoFinal = await aguardarResultadoPayout(batchId);
-        const dadosPayout = extrairDadosPayout(resultadoFinal.consulta);
-
-        atualizarPagamento(id, {
-          gatewayStatus: resultadoFinal.status,
-          nomeDestinatario: dadosPayout.nomeDestinatario || pagamento.nomeDestinatario,
-          documentoDestinatario: dadosPayout.documentoDestinatario || pagamento.documentoDestinatario,
-          payoutId: dadosPayout.payoutId,
-          endToEndId: dadosPayout.endToEndId,
-          providerTransactionId: dadosPayout.providerTransactionId,
-          providerChargeId: dadosPayout.providerChargeId,
-          pixTxid: dadosPayout.pixTxid,
-          externalRef: dadosPayout.externalRef || pagamento.id
-        });
-
-        if (resultadoFinal.tipo === "sucesso") {
-          pagamento = concluirPagamento(obterPagamento(id), batchId, resultadoFinal.status);
-          enviarComprovantePagamento({ client, paymentId: pagamento.id, user: interaction.user })
-            .catch(erro => console.error("Erro ao enviar comprovante no canal privado:", erro.message));
-          const saldo = obterCarteira(interaction.user.id).saldo;
-          return interaction.editReply(criarSucesso({ pagamento, saldo }));
-        }
-
-        if (resultadoFinal.tipo === "falha") {
-          pagamento = falharPagamento(obterPagamento(id), resultadoFinal.status);
-          aplicarCooldownDeErro(interaction.user.id, resultadoFinal.status);
-          return interaction.editReply({
-            embeds: [new EmbedBuilder()
-              .setColor("#EF4444")
-              .setTitle("Pagamento não realizado")
-              .setDescription("A Turbofy confirmou a falha. O valor voltou para sua carteira. Aguarde **1 minuto** antes de tentar novamente.")
-              .setFooter({ text: "Hydra Wallet" })],
-            components: []
-          });
-        }
-
-        return interaction.editReply({
+        await interaction.editReply({
           embeds: [new EmbedBuilder()
             .setColor("#F59E0B")
             .setTitle("Pagamento em processamento")
-            .setDescription("A Turbofy recebeu o pagamento e ainda está processando. O valor continuará reservado até a confirmação final.")
+            .setDescription("A Turbofy recebeu o pagamento. O status será atualizado automaticamente. **Não faça outro pagamento para a mesma chave.**")
             .setFooter({ text: "Hydra Wallet" })],
           components: []
         });
+
+        monitorarPagamento({
+          client,
+          paymentId: id,
+          onLongWait: async () => interaction.editReply({
+            embeds: [new EmbedBuilder().setColor("#F59E0B").setTitle("Pagamento em análise").setDescription("A instituição ainda está analisando. O saldo permanece reservado e será atualizado automaticamente. **Não faça outro pagamento para essa chave.**").setFooter({ text: "Hydra Wallet" })],
+            components: []
+          }),
+          onSuccess: async final => {
+            const saldo = obterCarteira(final.usuarioId).saldo;
+            await interaction.editReply(criarSucesso({ pagamento: final, saldo }));
+          },
+          onFailure: async () => interaction.editReply({
+            embeds: [new EmbedBuilder().setColor("#EF4444").setTitle("Pagamento não realizado").setDescription("A Turbofy confirmou a falha. O valor voltou para sua carteira. Aguarde **1 minuto** antes de tentar novamente.").setFooter({ text: "Hydra Wallet" })],
+            components: []
+          })
+        }).catch(erro => console.error("Erro no monitor do pagamento:", erro));
+        return;
       } catch (erro) {
         console.error("Erro no pagamento:", erro);
         pagamento = obterPagamento(id);
