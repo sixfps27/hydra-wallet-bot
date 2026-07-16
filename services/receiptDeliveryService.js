@@ -44,7 +44,7 @@ function selecionarItemDoPagamento(resposta, pagamento) {
 
     return referencias.includes(String(pagamento.id)) ||
       (pagamento.payoutId && String(item.id) === String(pagamento.payoutId));
-  }) || itens[0];
+  }) || (itens.length === 1 ? itens[0] : null);
 }
 
 function dadosDoItem(item = {}) {

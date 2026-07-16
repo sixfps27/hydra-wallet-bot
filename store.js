@@ -293,28 +293,23 @@ function obterPagamentoAtivoPorUsuarioChave(userId, chave, excluirId = null) {
 }
 
 
-function listarPagamentosReconciliaveis(limite = 8) {
-  const maximo = Math.max(1, Math.min(50, Number(limite) || 8));
+function listarPagamentosReconciliaveis(limite = 2) {
+  const maximo = Math.max(1, Math.min(10, Number(limite) || 2));
   const agora = Date.now();
-  const processandoDesde = agora - Math.max(30 * 60 * 1000, Number(process.env.PAYOUT_RECONCILE_MAX_AGE_MS || 24 * 60 * 60 * 1000));
-  const falhouDesde = agora - Math.max(5 * 60 * 1000, Number(process.env.PAYOUT_LATE_SUCCESS_WINDOW_MS || 30 * 60 * 1000));
+  const processandoDesde = agora - Math.max(30 * 60 * 1000, Number(process.env.PAYOUT_RECONCILE_MAX_AGE_MS || 2 * 60 * 60 * 1000));
 
-  // Novos pagamentos têm prioridade. Pagamentos falhos só são revisitados por uma janela curta
-  // para capturar confirmações tardias, evitando consultar o histórico inteiro para sempre.
+  // Reconciliação de fundo só pega pagamentos ainda processando, recentes e cujo backoff venceu.
+  // Pagamentos novos são acompanhados pelo monitor de alta prioridade iniciado no comando /enviar.
   return db.prepare(`
     SELECT id
     FROM payments
     WHERE gateway_batch_id IS NOT NULL
-      AND (
-        (status='processando' AND created_at>=?)
-        OR
-        (status='falhou' AND created_at>=?)
-      )
-    ORDER BY
-      CASE WHEN status='processando' THEN 0 ELSE 1 END,
-      created_at DESC
+      AND status='processando'
+      AND created_at>=?
+      AND (retry_after IS NULL OR retry_after<=?)
+    ORDER BY created_at DESC
     LIMIT ?
-  `).all(processandoDesde, falhouDesde, maximo).map(({ id }) => obterPagamento(id));
+  `).all(processandoDesde, agora, maximo).map(({ id }) => obterPagamento(id));
 }
 
 function criarDeposito({

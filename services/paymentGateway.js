@@ -74,7 +74,8 @@ async function consultarPagamento(batchId) {
     };
   }
 
-  return enfileirar(() => consultarPayout(batchId));
+  // Consultas de status são controladas pelo paymentMonitorService, com prioridade e circuit breaker.
+  return consultarPayout(batchId);
 }
 
 module.exports = {

@@ -174,7 +174,7 @@ function extrairDadosPayout(consulta = {}) {
 
 async function reconciliarPagamento(pagamento) {
   if (!pagamento?.batchId || pagamento.status !== "processando" || estaMonitorando(pagamento.id)) return pagamento;
-  return monitorarPagamento({ client, paymentId: pagamento.id });
+  return monitorarPagamento({ client, paymentId: pagamento.id, prioridade: "baixa" });
 }
 
 let reconciliacaoEmAndamento = false;
@@ -182,7 +182,7 @@ async function reconciliarPagamentosPendentes() {
   if (reconciliacaoEmAndamento) return;
   reconciliacaoEmAndamento = true;
   try {
-    const maxMonitores = Math.max(2, Number(process.env.PAYOUT_MAX_ACTIVE_MONITORS || 8));
+    const maxMonitores = Math.max(2, Number(process.env.PAYOUT_MAX_ACTIVE_MONITORS || 2));
     const vagas = Math.max(0, maxMonitores - quantidadeMonitores());
     if (!vagas) return;
 
@@ -506,6 +506,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
         monitorarPagamento({
           client,
           paymentId: id,
+          prioridade: "alta",
           onLongWait: async () => interaction.editReply({
             embeds: [new EmbedBuilder().setColor("#F59E0B").setTitle("Pagamento em análise").setDescription("A instituição ainda está analisando. O saldo permanece reservado e será atualizado automaticamente. **Não faça outro pagamento para essa chave.**").setFooter({ text: "Hydra Wallet" })],
             components: []
