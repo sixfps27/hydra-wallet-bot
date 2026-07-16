@@ -1,5 +1,8 @@
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
 const { AttachmentBuilder, EmbedBuilder } = require("discord.js");
 const { garantirPerfilECanalPrivado } = require("./profileChannelService");
 const { consultarPayout, baixarPdfPorEndpoint, baixarComprovanteTransacao } = require("./turbofyGateway");
@@ -7,6 +10,7 @@ const { obterPagamento, atualizarPagamento, marcarComprovanteEnviado } = require
 
 const RECEIPTS_DIR = path.join(__dirname, "..", "receipts");
 const consultasEmAndamento = new Map();
+const execFileAsync = promisify(execFile);
 
 function mascararChave(chave) {
   const texto = String(chave || "");
@@ -117,6 +121,39 @@ async function obterPdfOficial(pagamento) {
   return { buffer: oficial.buffer, nomeArquivo: nomeCache, cache: false, pagamento };
 }
 
+
+async function converterPdfParaPng(buffer, codigoHydra) {
+  const pastaTemporaria = await fs.promises.mkdtemp(path.join(os.tmpdir(), "hydra-receipt-"));
+  const pdfTemporario = path.join(pastaTemporaria, "comprovante.pdf");
+  const prefixoSaida = path.join(pastaTemporaria, "preview");
+
+  try {
+    await fs.promises.writeFile(pdfTemporario, buffer);
+    await execFileAsync("pdftoppm", [
+      "-f", "1",
+      "-singlefile",
+      "-png",
+      "-r", "150",
+      pdfTemporario,
+      prefixoSaida
+    ], { timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
+
+    const caminhoPng = `${prefixoSaida}.png`;
+    const pngBuffer = await fs.promises.readFile(caminhoPng);
+    const nomePng = nomeSeguro(`comprovante-${codigoHydra || "hydra"}.png`, "comprovante-hydra.png");
+    return { buffer: pngBuffer, nomeArquivo: nomePng };
+  } catch (erro) {
+    if (erro?.code === "ENOENT") {
+      const falha = new Error("PDFTOPPM_NAO_INSTALADO");
+      falha.code = "PDFTOPPM_NAO_INSTALADO";
+      throw falha;
+    }
+    throw erro;
+  } finally {
+    await fs.promises.rm(pastaTemporaria, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function enviarComprovantePagamento({ client, paymentId, user = null }) {
   let pagamento = obterPagamento(paymentId);
   if (!pagamento || pagamento.status !== "concluido") {
@@ -136,7 +173,16 @@ async function enviarComprovantePagamento({ client, paymentId, user = null }) {
   const pdf = await obterPdfOficial(pagamento);
   pagamento = pdf.pagamento || obterPagamento(paymentId);
 
-  const arquivo = new AttachmentBuilder(pdf.buffer, { name: pdf.nomeArquivo });
+  const codigoHydra = pagamento.codigoHydra || pagamento.id;
+  const nomePdf = nomeSeguro(`comprovante-${codigoHydra}.pdf`, `comprovante-${pagamento.id}.pdf`);
+  const arquivoPdf = new AttachmentBuilder(pdf.buffer, { name: nomePdf });
+
+  let preview = null;
+  try {
+    preview = await converterPdfParaPng(pdf.buffer, codigoHydra);
+  } catch (erro) {
+    console.error("Erro ao gerar preview PNG do comprovante:", erro.message);
+  }
   const data = new Date(pagamento.concluidoEm || Date.now()).toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo"
   });
@@ -144,7 +190,9 @@ async function enviarComprovantePagamento({ client, paymentId, user = null }) {
   const embed = new EmbedBuilder()
     .setColor("#22C55E")
     .setTitle("Pagamento Pix concluído")
-    .setDescription("O **comprovante oficial da Turbofy** está anexado abaixo.")
+    .setDescription(preview
+      ? "O **comprovante oficial da Turbofy** está visível abaixo e o PDF original foi anexado."
+      : "O **comprovante oficial da Turbofy** está anexado abaixo.")
     .addFields(
       { name: "Valor", value: `R$ ${Number(pagamento.valor).toFixed(2).replace(".", ",")}`, inline: true },
       { name: "Recebedor", value: pagamento.nomeDestinatario || "Titular da chave", inline: true },
@@ -154,6 +202,13 @@ async function enviarComprovantePagamento({ client, paymentId, user = null }) {
     )
     .setFooter({ text: "Hydra Systems • Comprovante oficial emitido pela Turbofy" });
 
+  const arquivos = [arquivoPdf];
+  if (preview) {
+    const arquivoPng = new AttachmentBuilder(preview.buffer, { name: preview.nomeArquivo });
+    arquivos.unshift(arquivoPng);
+    embed.setImage(`attachment://${preview.nomeArquivo}`);
+  }
+
   if (pagamento.endToEndId) {
     embed.addFields({
       name: "EndToEndId",
@@ -162,7 +217,7 @@ async function enviarComprovantePagamento({ client, paymentId, user = null }) {
     });
   }
 
-  await canal.send({ embeds: [embed], files: [arquivo] });
+  await canal.send({ embeds: [embed], files: arquivos });
   marcarComprovanteEnviado(paymentId);
   return { enviado: true, canalId: canal.id, oficial: true, cache: pdf.cache };
 }
