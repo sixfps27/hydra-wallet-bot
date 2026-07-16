@@ -21,7 +21,8 @@ const MAX_CONSULTAS_SIMULTANEAS = Math.max(1, Number(process.env.PAYOUT_STATUS_C
 const INTERVALO_MINIMO_API_MS = Math.max(350, Number(process.env.PAYOUT_STATUS_MIN_GAP_MS || 650));
 const filaConsultas = [];
 let consultasAtivas = 0;
-let ultimaConsultaEm = 0;
+let ultimoInicioConsultaEm = 0;
+let timerDrenagem = null;
 let pausaGlobalAte = 0;
 let falhasGlobaisRecentes = [];
 
@@ -50,13 +51,8 @@ function registrarFalhaGlobal(erro) {
 }
 
 async function executarConsultaAgendada(item) {
-  const agora = Date.now();
-  const esperaPausa = Math.max(0, pausaGlobalAte - agora);
-  const esperaGap = Math.max(0, INTERVALO_MINIMO_API_MS - (agora - ultimaConsultaEm));
-  if (esperaPausa || esperaGap) await esperar(Math.max(esperaPausa, esperaGap));
-
   consultasAtivas += 1;
-  ultimaConsultaEm = Date.now();
+  ultimoInicioConsultaEm = Date.now();
   try {
     return await item.tarefa();
   } catch (erro) {
@@ -64,15 +60,39 @@ async function executarConsultaAgendada(item) {
     throw erro;
   } finally {
     consultasAtivas -= 1;
-    drenarFila();
+    agendarDrenagem(0);
   }
 }
 
+function agendarDrenagem(atrasoMs = 0) {
+  if (timerDrenagem) return;
+  timerDrenagem = setTimeout(() => {
+    timerDrenagem = null;
+    drenarFila();
+  }, Math.max(0, atrasoMs));
+  timerDrenagem.unref?.();
+}
+
 function drenarFila() {
-  while (consultasAtivas < MAX_CONSULTAS_SIMULTANEAS && filaConsultas.length) {
-    filaConsultas.sort((a, b) => a.prioridade - b.prioridade || a.criadoEm - b.criadoEm);
-    const item = filaConsultas.shift();
-    executarConsultaAgendada(item).then(item.resolve, item.reject);
+  if (!filaConsultas.length || consultasAtivas >= MAX_CONSULTAS_SIMULTANEAS) return;
+
+  const agora = Date.now();
+  const aguardarPausa = Math.max(0, pausaGlobalAte - agora);
+  const aguardarGap = Math.max(0, INTERVALO_MINIMO_API_MS - (agora - ultimoInicioConsultaEm));
+  const espera = Math.max(aguardarPausa, aguardarGap);
+  if (espera > 0) {
+    agendarDrenagem(espera);
+    return;
+  }
+
+  filaConsultas.sort((a, b) => a.prioridade - b.prioridade || a.criadoEm - b.criadoEm);
+  const item = filaConsultas.shift();
+  executarConsultaAgendada(item).then(item.resolve, item.reject);
+
+  // Inicia a próxima chamada apenas depois do intervalo mínimo. Isso evita rajadas
+  // de 2 ou 3 consultas no mesmo milissegundo, que causavam rate limit na Turbofy.
+  if (filaConsultas.length && consultasAtivas < MAX_CONSULTAS_SIMULTANEAS) {
+    agendarDrenagem(INTERVALO_MINIMO_API_MS);
   }
 }
 
@@ -203,8 +223,13 @@ async function monitorar({ client, paymentId, prioridade = "alta", onLongWait, o
     let avisou = false;
     let errosSeguidos = 0;
     let passo = 0;
-    const prioridadeFila = prioridade === "baixa" ? 20 : 0;
-    const intervalosNormais = [1200, 1800, 2500, 3500, 5000, 7000, 10000, 15000, 20000, 30000];
+    const baixaPrioridade = prioridade === "baixa";
+    const prioridadeFila = baixaPrioridade ? 20 : 0;
+    // Pagamentos novos são consultados rapidamente. Reconciliações antigas usam
+    // intervalos maiores e nunca competem com um PIX recém-enviado.
+    const intervalosNormais = baixaPrioridade
+      ? [5000, 10000, 20000, 30000, 45000, 60000]
+      : [800, 1200, 1800, 2500, 3500, 5000, 7000, 10000, 15000, 20000, 30000];
 
     while (Date.now() - inicio < 20 * 60 * 1000) {
       let pagamento = obterPagamento(paymentId);

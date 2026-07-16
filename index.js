@@ -182,8 +182,9 @@ async function reconciliarPagamentosPendentes() {
   if (reconciliacaoEmAndamento) return;
   reconciliacaoEmAndamento = true;
   try {
-    const maxMonitores = Math.max(2, Number(process.env.PAYOUT_MAX_ACTIVE_MONITORS || 2));
-    const vagas = Math.max(0, maxMonitores - quantidadeMonitores());
+    const maxMonitoresFundo = Math.max(1, Number(process.env.PAYOUT_BACKGROUND_MONITORS || 1));
+    // Se existe pagamento novo sendo acompanhado, a reconciliação antiga espera.
+    const vagas = quantidadeMonitores() > 0 ? 0 : maxMonitoresFundo;
     if (!vagas) return;
 
     const pendentes = listarPagamentosReconciliaveis(vagas);
@@ -239,7 +240,7 @@ client.once(Events.ClientReady, bot => {
     console.error("Erro na reconciliação inicial:", erro);
   });
 
-  const intervalo = Math.max(30000, Number(process.env.PAYOUT_RECONCILE_INTERVAL_MS || 45000));
+  const intervalo = Math.max(60000, Number(process.env.PAYOUT_RECONCILE_INTERVAL_MS || 60000));
   setInterval(() => {
     reconciliarPagamentosPendentes().catch(erro => {
       console.error("Erro na reconciliação periódica:", erro);
