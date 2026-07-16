@@ -25,7 +25,7 @@ const {
 const { processarEnvioPix, verificarEnvioPix } = require("./services/walletManager");
 const { criarCobrancaPix, consultarCobrancaPix } = require("./services/turbofyGateway");
 const { enviarComprovantePagamento } = require("./services/receiptDeliveryService");
-const { monitorar: monitorarPagamento, estaMonitorando } = require("./services/paymentMonitorService");
+const { monitorar: monitorarPagamento, estaMonitorando, quantidadeMonitores } = require("./services/paymentMonitorService");
 
 if (!process.env.TOKEN) {
   console.error("TOKEN não encontrado no .env");
@@ -181,13 +181,22 @@ let reconciliacaoEmAndamento = false;
 async function reconciliarPagamentosPendentes() {
   if (reconciliacaoEmAndamento) return;
   reconciliacaoEmAndamento = true;
-  const pendentes = listarPagamentosReconciliaveis();
   try {
+    const maxMonitores = Math.max(2, Number(process.env.PAYOUT_MAX_ACTIVE_MONITORS || 8));
+    const vagas = Math.max(0, maxMonitores - quantidadeMonitores());
+    if (!vagas) return;
+
+    const pendentes = listarPagamentosReconciliaveis(vagas);
     for (const pagamento of pendentes) {
-      try { reconciliarPagamento(pagamento).catch(erro => console.error(`Erro ao reconciliar pagamento ${pagamento.id}:`, erro.code || erro.message)); }
-      catch (erro) { console.error(`Erro ao iniciar reconciliação ${pagamento.id}:`, erro.code || erro.message); }
+      if (estaMonitorando(pagamento.id)) continue;
+      // Não aguardamos os 20 minutos do monitor aqui. A Map interna garante uma única instância.
+      reconciliarPagamento(pagamento).catch(erro => {
+        console.error(`Erro ao reconciliar pagamento ${pagamento.id}:`, erro.code || erro.message);
+      });
     }
-  } finally { reconciliacaoEmAndamento = false; }
+  } finally {
+    reconciliacaoEmAndamento = false;
+  }
 }
 
 async function confirmarDepositoPago(depositoId) {
@@ -230,7 +239,7 @@ client.once(Events.ClientReady, bot => {
     console.error("Erro na reconciliação inicial:", erro);
   });
 
-  const intervalo = Math.max(15000, Number(process.env.PAYOUT_RECONCILE_INTERVAL_MS || 30000));
+  const intervalo = Math.max(30000, Number(process.env.PAYOUT_RECONCILE_INTERVAL_MS || 45000));
   setInterval(() => {
     reconciliarPagamentosPendentes().catch(erro => {
       console.error("Erro na reconciliação periódica:", erro);
