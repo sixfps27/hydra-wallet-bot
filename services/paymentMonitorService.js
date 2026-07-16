@@ -7,6 +7,7 @@ const {
   definirCooldown
 } = require("../store");
 const { verificarEnvioPix } = require("./walletManager");
+const { localizarPayoutPorReferencia } = require("./turbofyGateway");
 const { enviarComprovantePagamento } = require("./receiptDeliveryService");
 
 const esperar = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -75,10 +76,10 @@ function drenarFila() {
   }
 }
 
-function consultarStatusComControle(batchId, prioridade = 5) {
+function agendarConsulta(tarefa, prioridade = 5) {
   return new Promise((resolve, reject) => {
     filaConsultas.push({
-      tarefa: () => verificarEnvioPix(batchId),
+      tarefa,
       prioridade,
       criadoEm: Date.now(),
       resolve,
@@ -86,6 +87,17 @@ function consultarStatusComControle(batchId, prioridade = 5) {
     });
     drenarFila();
   });
+}
+
+function consultarStatusComControle(batchId, prioridade = 5) {
+  return agendarConsulta(() => verificarEnvioPix(batchId), prioridade);
+}
+
+function localizarBatchComControle(paymentId, prioridade = 5) {
+  return agendarConsulta(
+    () => localizarPayoutPorReferencia(paymentId, { paginas: 2, limit: 50 }),
+    prioridade
+  );
 }
 
 function valorTexto(valor) {
@@ -197,7 +209,40 @@ async function monitorar({ client, paymentId, prioridade = "alta", onLongWait, o
     while (Date.now() - inicio < 20 * 60 * 1000) {
       let pagamento = obterPagamento(paymentId);
       if (!pagamento || pagamento.status === "concluido" || pagamento.status === "falhou") return pagamento;
-      if (!pagamento.batchId) return pagamento;
+
+      if (!pagamento.batchId) {
+        try {
+          const localizado = await localizarBatchComControle(paymentId, prioridadeFila);
+          if (localizado?.batchId) {
+            atualizarPagamento(paymentId, {
+              batchId: localizado.batchId,
+              gatewayStatus: localizado.status || "processing"
+            });
+            pagamento = obterPagamento(paymentId);
+            console.log(`[MONITOR PIX] ${paymentId}: lote recuperado ${localizado.batchId}`);
+          } else {
+            if (!avisou && Date.now() - inicio >= 30000) {
+              avisou = true;
+              atualizarPagamento(paymentId, { analiseAvisadaEm: Date.now() });
+              if (onLongWait) await onLongWait(obterPagamento(paymentId)).catch(() => {});
+            }
+            await esperar(intervalosNormais[Math.min(passo++, intervalosNormais.length - 1)]);
+            continue;
+          }
+        } catch (erro) {
+          errosSeguidos += 1;
+          const esperaErro = Math.min(60000, 5000 * Math.pow(2, Math.min(errosSeguidos - 1, 4)));
+          atualizarPagamento(paymentId, {
+            retryCount: errosSeguidos,
+            retryAfter: Date.now() + esperaErro
+          });
+          if (errosSeguidos === 1 || errosSeguidos % 5 === 0) {
+            console.error(`[MONITOR PIX] ${paymentId}: falha ao localizar lote:`, erro.code || erro.message);
+          }
+          await esperar(esperaErro);
+          continue;
+        }
+      }
 
       const agora = Date.now();
       if (pagamento.retryAfter && Number(pagamento.retryAfter) > agora) {

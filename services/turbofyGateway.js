@@ -175,8 +175,59 @@ async function baixarComprovanteTransacao(transactionId) {
   return baixarPdfPorEndpoint(`/v1/receipts/transactions/${encodeURIComponent(String(transactionId))}`);
 }
 
-async function listarPayouts() {
-  return requisicaoTurbofy({ method: "GET", path: "/v1/payouts/batches" });
+async function listarPayouts({ limit = 50, offset = 0 } = {}) {
+  const limite = Math.max(1, Math.min(100, Number(limit) || 50));
+  const deslocamento = Math.max(0, Number(offset) || 0);
+  return requisicaoTurbofy({
+    method: "GET",
+    path: `/v1/payouts/batches?limit=${limite}&offset=${deslocamento}`
+  });
+}
+
+function referenciasDoItem(item = {}) {
+  return [
+    item.id,
+    item.payoutItemId,
+    item.referenceId,
+    item.externalRef,
+    item.externalReference,
+    item.tracking?.referenceId,
+    item.tracking?.idempotencyKey,
+    item.tracking?.endToEndId,
+    item.endToEndId
+  ].filter(Boolean).map(valor => String(valor).trim());
+}
+
+async function localizarPayoutPorReferencia(referenceId, { paginas = 2, limit = 50 } = {}) {
+  const procurado = String(referenceId || "").trim();
+  if (!procurado) throw new Error("REFERENCE_ID_NAO_INFORMADO");
+
+  const maxPaginas = Math.max(1, Math.min(5, Number(paginas) || 2));
+  const limite = Math.max(1, Math.min(100, Number(limit) || 50));
+
+  for (let pagina = 0; pagina < maxPaginas; pagina += 1) {
+    const resposta = await listarPayouts({ limit: limite, offset: pagina * limite });
+    const lotes = Array.isArray(resposta?.items) ? resposta.items : [];
+
+    for (const lote of lotes) {
+      const grupos = [lote.items, lote.paidItems, lote.failedItems].filter(Array.isArray);
+      const itens = grupos.flat().filter(Boolean);
+      const item = itens.find(candidato => referenciasDoItem(candidato).includes(procurado));
+
+      if (item) {
+        return {
+          batchId: lote.id,
+          status: lote.status || item.status || "processing",
+          lote,
+          item
+        };
+      }
+    }
+
+    if (lotes.length < limite) break;
+  }
+
+  return null;
 }
 
 module.exports = {
@@ -187,6 +238,7 @@ module.exports = {
   criarPayout,
   consultarPayout,
   listarPayouts,
+  localizarPayoutPorReferencia,
   baixarPdfPorEndpoint,
   baixarComprovanteTransacao
 };

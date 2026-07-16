@@ -544,14 +544,44 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
           });
         }
 
-        return interaction.editReply({
+        await interaction.editReply({
           embeds: [new EmbedBuilder()
             .setColor("#F59E0B")
             .setTitle("Pagamento em análise")
-            .setDescription("Não foi possível confirmar o resultado agora. Por segurança, o valor continuará reservado até consultarmos a Turbofy novamente.")
+            .setDescription("Não foi possível confirmar o resultado agora. Por segurança, o valor continuará reservado e o Hydra continuará procurando a transação na Turbofy automaticamente. **Não faça outro pagamento para a mesma chave.**")
             .setFooter({ text: "Hydra Wallet" })],
           components: []
         });
+
+        // O POST pode ter sido aceito pela Turbofy mesmo quando a resposta se perde por
+        // timeout/instabilidade. Iniciamos o monitor mesmo sem batchId: ele recupera o
+        // lote pelo referenceId (o ID Hydra) e atualiza esta mesma mensagem ao concluir.
+        monitorarPagamento({
+          client,
+          paymentId: id,
+          prioridade: "alta",
+          onLongWait: async () => interaction.editReply({
+            embeds: [new EmbedBuilder()
+              .setColor("#F59E0B")
+              .setTitle("Pagamento em análise")
+              .setDescription("A transação continua sendo verificada. O valor permanece reservado e será atualizado automaticamente. **Não faça outro pagamento para essa chave.**")
+              .setFooter({ text: "Hydra Wallet" })],
+            components: []
+          }),
+          onSuccess: async final => {
+            const saldo = obterCarteira(final.usuarioId).saldo;
+            await interaction.editReply(criarSucesso({ pagamento: final, saldo }));
+          },
+          onFailure: async () => interaction.editReply({
+            embeds: [new EmbedBuilder()
+              .setColor("#EF4444")
+              .setTitle("Pagamento não realizado")
+              .setDescription("A Turbofy confirmou a falha. O valor voltou para sua carteira. Aguarde **1 minuto** antes de tentar novamente.")
+              .setFooter({ text: "Hydra Wallet" })],
+            components: []
+          })
+        }).catch(erroMonitor => console.error("Erro no monitor de recuperação:", erroMonitor));
+        return;
       }
     }
 
