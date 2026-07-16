@@ -154,9 +154,9 @@ async function garantirPerfilECanalPrivado({ client, user }) {
 
   await canal.send({
     content: [
-      "# Hydra Systems Wallet",
+      "# Hydra Systems",
       `Olá, <@${user.id}>. Este é o seu canal privado de comprovantes.`,
-      "Somente você e a equipe autorizada da Hydra Wallet podem visualizar este canal.",
+      "Somente você e a equipe autorizada da Hydra Systems podem visualizar este canal.",
       "Os comprovantes e movimentações da sua carteira serão enviados aqui."
     ].join("\n")
   });

@@ -29,7 +29,7 @@ async function preparar(interaction,chave,valor){
 }
 
 module.exports={
- data:new SlashCommandBuilder().setName("enviar").setDescription("Envia um Pix pela Hydra Wallet").addStringOption(o=>o.setName("dados").setDescription("Chave e valor. Ex.: email@gmail.com 10").setRequired(true)).setIntegrationTypes(ApplicationIntegrationType.GuildInstall,ApplicationIntegrationType.UserInstall).setContexts(InteractionContextType.Guild,InteractionContextType.BotDM,InteractionContextType.PrivateChannel),
+ data:new SlashCommandBuilder().setName("enviar").setDescription("Envia uma transferência Pix pela Hydra Systems").addStringOption(o=>o.setName("dados").setDescription("Chave e valor. Ex.: email@gmail.com 10").setRequired(true)).setIntegrationTypes(ApplicationIntegrationType.GuildInstall,ApplicationIntegrationType.UserInstall).setContexts(InteractionContextType.Guild,InteractionContextType.BotDM,InteractionContextType.PrivateChannel),
  async execute(interaction){ const partes=interaction.options.getString("dados",true).trim().split(/\s+/); if(partes.length<2) return interaction.reply({content:"Use: `/enviar dados: email@gmail.com 10`",flags:MessageFlags.Ephemeral}); const valor=converterValor(partes.pop()); await preparar(interaction,partes.join(""),valor); },
  criarModalEnviar, preparar
 };

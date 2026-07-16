@@ -95,7 +95,7 @@ async function criarPayout({ pixKey, pixKeyType, amountCents, recipientName, rec
     idempotencyKey,
     body: {
       idempotencyKey,
-      description: description || "Pagamento Hydra Wallet",
+      description: description || "Pagamento Hydra Systems",
       items: [{ pixKey, pixKeyType, amountCents, recipientName, recipientDocument, referenceId }],
       metadata: metadata || {}
     }

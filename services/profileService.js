@@ -26,7 +26,7 @@ async function garantirPerfilECanal(interaction) {
     name: `carteira-${slug(user.username)}-${user.id.slice(-4)}`,
     type: ChannelType.GuildText,
     parent: categoryId,
-    topic: `Canal privado da Hydra Systems Wallet • Usuário ${user.id}`,
+    topic: `Canal financeiro privado da Hydra Systems • Usuário ${user.id}`,
     permissionOverwrites: [
       { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
       { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },

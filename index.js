@@ -222,7 +222,7 @@ async function monitorarDeposito({ interaction, depositoId }) {
       if (!resultado.pago) continue;
       const saldo = obterCarteira(deposito.usuarioId).saldo;
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setColor("#22C55E").setTitle("Depósito confirmado").setDescription(`Saldo adicionado: **${formatarDinheiro(resultado.deposito.valorLiquido)}**\n\nSaldo atual: **${formatarDinheiro(saldo)}**`).setFooter({ text: "Hydra Wallet" })],
+        embeds: [new EmbedBuilder().setColor("#22C55E").setTitle("Depósito confirmado").setDescription(`Saldo adicionado: **${formatarDinheiro(resultado.deposito.valorLiquido)}**\n\nSaldo atual: **${formatarDinheiro(saldo)}**`).setFooter({ text: "Hydra Systems" })],
         components: [], attachments: []
       }).catch(() => {});
       return;
@@ -233,7 +233,7 @@ async function monitorarDeposito({ interaction, depositoId }) {
 client.once(Events.ClientReady, bot => {
   console.log(`✅ ${bot.user.tag} está online!`);
   console.log(`💳 Modo: ${process.env.PAYMENT_MODE || "mock"}`);
-  bot.user.setActivity("Hydra Wallet", { type: ActivityType.Watching });
+  bot.user.setActivity("Hydra Systems", { type: ActivityType.Watching });
 
   reconciliarPagamentosPendentes().catch(erro => {
     console.error("Erro na reconciliação inicial:", erro);
@@ -362,7 +362,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
               `Taxa Hydra Systems (${taxaHydraPercentual}%): **${formatarDinheiro(taxaHydra)}**\n\n` +
               `Saldo que será creditado: **${formatarDinheiro(liquido)}**\n\nAmbiente de testes.`
             )
-            .setImage(`attachment://${arquivo}`).setFooter({ text: "Hydra Wallet" });
+            .setImage(`attachment://${arquivo}`).setFooter({ text: "Hydra Systems" });
           const components = [new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`copiar_pix:${id}`).setLabel("Pix copia e cola").setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId(`cancelar_deposito:${id}`).setLabel("Cancelar").setStyle(ButtonStyle.Secondary)
@@ -372,7 +372,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
 
         const cobranca = await criarCobrancaPix({
           amountCents: valorCents,
-          description: "Depósito Hydra Wallet",
+          description: "Depósito Hydra Systems",
           externalRef: `hydra-deposit-${id}`,
           expiresAt: expiraEm.toISOString(),
           metadata: {
@@ -409,7 +409,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
             `Taxa Hydra Systems (${taxaHydraPercentual}%): **${formatarDinheiro(taxaHydra)}**\n\n` +
             `Saldo que será creditado: **${formatarDinheiro(liquido)}**\n\nAguardando pagamento.`
           )
-          .setImage(`attachment://${arquivo}`).setFooter({ text: "Hydra Wallet" });
+          .setImage(`attachment://${arquivo}`).setFooter({ text: "Hydra Systems" });
         const components = [new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`copiar_pix_real:${id}`).setLabel("Pix copia e cola").setStyle(ButtonStyle.Primary),
           new ButtonBuilder().setCustomId(`verificar_deposito:${id}`).setLabel("Já paguei").setStyle(ButtonStyle.Success),
@@ -422,7 +422,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
         return;
       } catch (erro) {
         console.error("Erro ao criar cobrança Pix:", erro.code, erro.message, erro.details || "");
-        return interaction.editReply({ embeds: [new EmbedBuilder().setColor("#EF4444").setTitle("Não foi possível gerar o Pix").setDescription("Tente novamente em alguns instantes.").setFooter({ text: "Hydra Wallet" })], components: [] });
+        return interaction.editReply({ embeds: [new EmbedBuilder().setColor("#EF4444").setTitle("Não foi possível gerar o Pix").setDescription("Tente novamente em alguns instantes.").setFooter({ text: "Hydra Systems" })], components: [] });
       }
     }
 
@@ -448,7 +448,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
           return interaction.followUp({ content: "O pagamento ainda não foi confirmado pela Turbofy.", flags: MessageFlags.Ephemeral });
         }
         const saldo = obterCarteira(interaction.user.id).saldo;
-        return interaction.editReply({ embeds: [new EmbedBuilder().setColor("#22C55E").setTitle("Depósito confirmado").setDescription(`Saldo adicionado: **${formatarDinheiro(resultado.deposito.valorLiquido)}**\n\nSaldo atual: **${formatarDinheiro(saldo)}**`).setFooter({ text: "Hydra Wallet" })], components: [], attachments: [] });
+        return interaction.editReply({ embeds: [new EmbedBuilder().setColor("#22C55E").setTitle("Depósito confirmado").setDescription(`Saldo adicionado: **${formatarDinheiro(resultado.deposito.valorLiquido)}**\n\nSaldo atual: **${formatarDinheiro(saldo)}**`).setFooter({ text: "Hydra Systems" })], components: [], attachments: [] });
       } catch (erro) {
         console.error("Erro ao verificar depósito:", erro.code, erro.message, erro.details || "");
         return interaction.followUp({ content: "Não consegui verificar agora. Tente novamente em alguns segundos.", flags: MessageFlags.Ephemeral });
@@ -463,7 +463,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
       const cooldown = obterCooldown(interaction.user.id, "pix_send");
       if (cooldown.ativo) {
         return interaction.update({
-          embeds: [new EmbedBuilder().setColor("#F59E0B").setTitle("Aguarde para tentar novamente").setDescription(mensagemCooldown(cooldown)).setFooter({ text: "Hydra Wallet" })],
+          embeds: [new EmbedBuilder().setColor("#F59E0B").setTitle("Aguarde para tentar novamente").setDescription(mensagemCooldown(cooldown)).setFooter({ text: "Hydra Systems" })],
           components: []
         });
       }
@@ -486,7 +486,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
           referencia: pagamento.id,
           onRetryAgendado: async ({ esperaMs }) => {
             await interaction.editReply({
-              embeds: [new EmbedBuilder().setColor("#F59E0B").setTitle("Nova tentativa agendada").setDescription(`A primeira tentativa não foi aceita. Por segurança da API, aguardaremos **${Math.ceil(esperaMs/1000)} segundos** antes da única nova tentativa. Não faça outro pagamento.`).setFooter({ text: "Hydra Wallet" })],
+              embeds: [new EmbedBuilder().setColor("#F59E0B").setTitle("Nova tentativa agendada").setDescription(`A primeira tentativa não foi aceita. Por segurança da API, aguardaremos **${Math.ceil(esperaMs/1000)} segundos** antes da única nova tentativa. Não faça outro pagamento.`).setFooter({ text: "Hydra Systems" })],
               components: []
             }).catch(() => {});
           }
@@ -499,7 +499,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
             .setColor("#F59E0B")
             .setTitle("Pagamento em processamento")
             .setDescription("A Turbofy recebeu o pagamento. O status será atualizado automaticamente. **Não faça outro pagamento para a mesma chave.**")
-            .setFooter({ text: "Hydra Wallet" })],
+            .setFooter({ text: "Hydra Systems" })],
           components: []
         });
 
@@ -508,7 +508,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
           paymentId: id,
           prioridade: "alta",
           onLongWait: async () => interaction.editReply({
-            embeds: [new EmbedBuilder().setColor("#F59E0B").setTitle("Pagamento em análise").setDescription("A instituição ainda está analisando. O saldo permanece reservado e será atualizado automaticamente. **Não faça outro pagamento para essa chave.**").setFooter({ text: "Hydra Wallet" })],
+            embeds: [new EmbedBuilder().setColor("#F59E0B").setTitle("Pagamento em análise").setDescription("A instituição ainda está analisando. O saldo permanece reservado e será atualizado automaticamente. **Não faça outro pagamento para essa chave.**").setFooter({ text: "Hydra Systems" })],
             components: []
           }),
           onSuccess: async final => {
@@ -516,7 +516,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
             await interaction.editReply(criarSucesso({ pagamento: final, saldo }));
           },
           onFailure: async () => interaction.editReply({
-            embeds: [new EmbedBuilder().setColor("#EF4444").setTitle("Pagamento não realizado").setDescription("A Turbofy confirmou a falha. O valor voltou para sua carteira. Aguarde **1 minuto** antes de tentar novamente.").setFooter({ text: "Hydra Wallet" })],
+            embeds: [new EmbedBuilder().setColor("#EF4444").setTitle("Pagamento não realizado").setDescription("A Turbofy confirmou a falha. O valor voltou para sua carteira. Aguarde **1 minuto** antes de tentar novamente.").setFooter({ text: "Hydra Systems" })],
             components: []
           })
         }).catch(erro => console.error("Erro no monitor do pagamento:", erro));
@@ -539,7 +539,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
               .setColor("#EF4444")
               .setTitle("Pagamento não realizado")
               .setDescription("A Turbofy recusou a solicitação. O valor voltou para sua carteira. Aguarde **1 minuto** antes de tentar novamente.")
-              .setFooter({ text: "Hydra Wallet" })],
+              .setFooter({ text: "Hydra Systems" })],
             components: []
           });
         }
@@ -549,7 +549,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
             .setColor("#F59E0B")
             .setTitle("Pagamento em análise")
             .setDescription("Não foi possível confirmar o resultado agora. Por segurança, o valor continuará reservado e o Hydra continuará procurando a transação na Turbofy automaticamente. **Não faça outro pagamento para a mesma chave.**")
-            .setFooter({ text: "Hydra Wallet" })],
+            .setFooter({ text: "Hydra Systems" })],
           components: []
         });
 
@@ -565,7 +565,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
               .setColor("#F59E0B")
               .setTitle("Pagamento em análise")
               .setDescription("A transação continua sendo verificada. O valor permanece reservado e será atualizado automaticamente. **Não faça outro pagamento para essa chave.**")
-              .setFooter({ text: "Hydra Wallet" })],
+              .setFooter({ text: "Hydra Systems" })],
             components: []
           }),
           onSuccess: async final => {
@@ -577,7 +577,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
               .setColor("#EF4444")
               .setTitle("Pagamento não realizado")
               .setDescription("A Turbofy confirmou a falha. O valor voltou para sua carteira. Aguarde **1 minuto** antes de tentar novamente.")
-              .setFooter({ text: "Hydra Wallet" })],
+              .setFooter({ text: "Hydra Systems" })],
             components: []
           })
         }).catch(erroMonitor => console.error("Erro no monitor de recuperação:", erroMonitor));
@@ -591,7 +591,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
       if (!p || p.usuarioId !== interaction.user.id) return interaction.reply({ content: "Pagamento não encontrado.", flags: MessageFlags.Ephemeral });
       if (p.status !== "aguardando_confirmacao") return interaction.reply({ content: "Não é mais possível cancelar.", flags: MessageFlags.Ephemeral });
       atualizarPagamento(id, { status: "cancelado" });
-      return interaction.update({ embeds: [new EmbedBuilder().setColor("#6B7280").setTitle("Pagamento cancelado").setFooter({ text: "Hydra Wallet" })], components: [] });
+      return interaction.update({ embeds: [new EmbedBuilder().setColor("#6B7280").setTitle("Pagamento cancelado").setFooter({ text: "Hydra Systems" })], components: [] });
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("comprovante:")) {
@@ -620,7 +620,7 @@ Toque e segure para copiar. Se preferir, abra o arquivo anexado.`,
       const carteira = obterCarteira(interaction.user.id);
       if (!carteira.extrato.length) return interaction.reply({ content: "Você ainda não possui movimentações.", flags: MessageFlags.Ephemeral });
       const texto = carteira.extrato.slice(0, 10).map(item => `${item.tipo === "pix_enviado" ? "Enviado" : "Crédito"} — **${formatarDinheiro(item.valor)}**\n${item.nome}`).join("\n\n");
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor("#2563EB").setTitle("Extrato").setDescription(texto).setFooter({ text: "Hydra Wallet" })], flags: MessageFlags.Ephemeral });
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor("#2563EB").setTitle("Extrato").setDescription(texto).setFooter({ text: "Hydra Systems" })], flags: MessageFlags.Ephemeral });
     }
   } catch (erro) {
     console.error("Erro na interação:", erro);

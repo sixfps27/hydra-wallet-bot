@@ -52,7 +52,7 @@ async function enviarPix({
     recipientName,
     recipientDocument,
     referenceId,
-    description: "Pagamento Hydra Wallet",
+    description: "Pagamento Hydra Systems",
     metadata: {
       discordUserId
     },

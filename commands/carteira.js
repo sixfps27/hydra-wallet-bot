@@ -12,7 +12,7 @@ const { garantirPerfilECanalPrivado } = require("../services/profileChannelServi
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("carteira")
-    .setDescription("Mostra sua Hydra Systems Wallet")
+    .setDescription("Abre seu painel financeiro da Hydra Systems")
     .setIntegrationTypes(
       ApplicationIntegrationType.GuildInstall,
       ApplicationIntegrationType.UserInstall

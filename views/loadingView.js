@@ -1,14 +1,27 @@
 const { EmbedBuilder } = require("discord.js");
 const { formatarDinheiro } = require("../utils/money");
+const { COLORS, FOOTER } = require("./theme");
 
 function criarCarregamento({ valor, chave }) {
   return {
-    embeds: [new EmbedBuilder()
-      .setColor("#F59E0B")
-      .setTitle("Enviando pagamento...")
-      .setDescription(`**${formatarDinheiro(valor)}** para \`${chave}\``)
-      .setFooter({ text: "Hydra Wallet" })],
+    embeds: [
+      new EmbedBuilder()
+        .setColor(COLORS.warning)
+        .setAuthor({ name: "HYDRA SYSTEMS" })
+        .setTitle("Processando sua transferência")
+        .setDescription([
+          "Aguarde enquanto confirmamos o pagamento com a instituição.",
+          "",
+          `**Valor:** ${formatarDinheiro(valor)}`,
+          `**Destino:** \`${chave}\``,
+          "",
+          "⏳ Não faça outro pagamento para a mesma chave enquanto este estiver em análise."
+        ].join("\n"))
+        .setFooter({ text: FOOTER })
+        .setTimestamp()
+    ],
     components: []
   };
 }
+
 module.exports = { criarCarregamento };
